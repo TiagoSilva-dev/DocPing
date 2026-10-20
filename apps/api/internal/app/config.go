@@ -1,6 +1,8 @@
 package app
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"github.com/go-sql-driver/mysql"
 	"net"
@@ -12,10 +14,10 @@ import (
 )
 
 type Config struct {
-	Env, Port, Origin, Driver, DSN, DataDir, S3Endpoint, S3Bucket, S3Access, S3Secret, Scanner, SMTPHost, SMTPPort, SMTPFrom, SMTPUser, SMTPPass string
-	SMTPRequireTLS, AllowUnscanned                                                                                                               bool
-	MaxUpload, MaxOrgBytes, MaxRequestBytes                                                                                                      int64
-	ClientLimit                                                                                                                                  int
+	Env, Port, Origin, Driver, DSN, MySQLCACert, DataDir, S3Endpoint, S3Bucket, S3Access, S3Secret, Scanner, SMTPHost, SMTPPort, SMTPFrom, SMTPUser, SMTPPass string
+	SMTPRequireTLS, AllowUnscanned                                                                                                                            bool
+	MaxUpload, MaxOrgBytes, MaxRequestBytes                                                                                                                   int64
+	ClientLimit                                                                                                                                               int
 	// Automated conformity analysis. AIReview is the server-wide switch; an
 	// organization still chooses off/suggest/auto for itself. Extraction is
 	// Docling with PaddleOCR as the OCR fallback for photographed pages, and
@@ -167,7 +169,7 @@ func LoadConfig() (Config, error) {
 	aiChars, _ := strconv.Atoi(env("AI_MAX_CHARS", "24000"))
 	aiApprove, _ := strconv.ParseFloat(env("AI_APPROVE_CONFIDENCE", "0.70"), 64)
 	aiReject, _ := strconv.ParseFloat(env("AI_REJECT_CONFIDENCE", "0.75"), 64)
-	c := Config{Env: env("APP_ENV", "production"), Port: env("PORT", "8080"), Origin: env("WEB_ORIGIN", env("FRONTEND_URL", "http://localhost:5173")), Driver: env("STORE_DRIVER", "mysql"), DSN: env("MYSQL_DSN", os.Getenv("DATABASE_DSN")), DataDir: env("DATA_DIR", ".data"), S3Endpoint: os.Getenv("S3_ENDPOINT"), S3Bucket: env("S3_BUCKET", "docping"), S3Access: os.Getenv("S3_ACCESS_KEY"), S3Secret: os.Getenv("S3_SECRET_KEY"), Scanner: os.Getenv("CLAMAV_ADDRESS"), AllowUnscanned: os.Getenv("ALLOW_UNSCANNED_UPLOADS") == "true", SMTPHost: os.Getenv("SMTP_HOST"), SMTPPort: env("SMTP_PORT", "1025"), SMTPFrom: os.Getenv("SMTP_FROM"), SMTPUser: os.Getenv("SMTP_USERNAME"), SMTPPass: os.Getenv("SMTP_PASSWORD"), SMTPRequireTLS: env("SMTP_REQUIRE_TLS", "true") == "true", MaxUpload: maxBytes, MaxOrgBytes: orgBytes, MaxRequestBytes: requestBytes, ClientLimit: limit, Location: loc, AIReview: os.Getenv("AI_REVIEW_ENABLED") == "true", DoclingURL: os.Getenv("DOCLING_URL"), DoclingKey: os.Getenv("DOCLING_API_KEY"), DoclingLang: env("DOCLING_OCR_LANG", "pt"), PaddleURL: os.Getenv("PADDLEOCR_URL"), JevURL: env("TYPESAFE_API_URL", "https://api.typesafe.ai"), JevKey: os.Getenv("TYPESAFE_API_KEY"), JevModel: env("TYPESAFE_MODEL", "jev-latest"), AIMaxChars: aiChars, AIApprove: aiApprove, AIReject: aiReject}
+	c := Config{Env: env("APP_ENV", "production"), Port: env("PORT", "8080"), Origin: env("WEB_ORIGIN", env("FRONTEND_URL", "http://localhost:5173")), Driver: env("STORE_DRIVER", "mysql"), DSN: env("MYSQL_DSN", os.Getenv("DATABASE_DSN")), MySQLCACert: os.Getenv("MYSQL_CA_CERT"), DataDir: env("DATA_DIR", ".data"), S3Endpoint: os.Getenv("S3_ENDPOINT"), S3Bucket: env("S3_BUCKET", "docping"), S3Access: os.Getenv("S3_ACCESS_KEY"), S3Secret: os.Getenv("S3_SECRET_KEY"), Scanner: os.Getenv("CLAMAV_ADDRESS"), AllowUnscanned: os.Getenv("ALLOW_UNSCANNED_UPLOADS") == "true", SMTPHost: os.Getenv("SMTP_HOST"), SMTPPort: env("SMTP_PORT", "1025"), SMTPFrom: os.Getenv("SMTP_FROM"), SMTPUser: os.Getenv("SMTP_USERNAME"), SMTPPass: os.Getenv("SMTP_PASSWORD"), SMTPRequireTLS: env("SMTP_REQUIRE_TLS", "true") == "true", MaxUpload: maxBytes, MaxOrgBytes: orgBytes, MaxRequestBytes: requestBytes, ClientLimit: limit, Location: loc, AIReview: os.Getenv("AI_REVIEW_ENABLED") == "true", DoclingURL: os.Getenv("DOCLING_URL"), DoclingKey: os.Getenv("DOCLING_API_KEY"), DoclingLang: env("DOCLING_OCR_LANG", "pt"), PaddleURL: os.Getenv("PADDLEOCR_URL"), JevURL: env("TYPESAFE_API_URL", "https://api.typesafe.ai"), JevKey: os.Getenv("TYPESAFE_API_KEY"), JevModel: env("TYPESAFE_MODEL", "jev-latest"), AIMaxChars: aiChars, AIApprove: aiApprove, AIReject: aiReject}
 	if c.Env != "development" && c.Env != "production" && c.Env != "test" {
 		return c, errors.New("APP_ENV must be development or production")
 	}
@@ -179,6 +181,11 @@ func LoadConfig() (Config, error) {
 	if c.TrustedProxies, err = parseTrustedProxies(os.Getenv("TRUSTED_PROXY_CIDRS")); err != nil {
 		return c, err
 	}
+	if c.Driver == "mysql" && c.DSN != "" {
+		if e := c.registerMySQLCA(); e != nil {
+			return c, e
+		}
+	}
 	if c.Env == "production" && (c.Driver != "mysql" || c.DSN == "" || c.S3Endpoint == "" || c.Scanner == "" || c.AllowUnscanned || c.SMTPHost == "" || c.SMTPFrom == "" || !c.SMTPRequireTLS) {
 		return c, errors.New("production requires HTTPS WEB_ORIGIN, MySQL, private S3, ClamAV and TLS SMTP; development bypasses are forbidden")
 	}
@@ -189,8 +196,8 @@ func LoadConfig() (Config, error) {
 			}
 		}
 		dsnConfig, e := mysql.ParseDSN(c.DSN)
-		if e != nil || dsnConfig.TLSConfig != "true" {
-			return c, errors.New("production MySQL DSN requires verified TLS (tls=true)")
+		if e != nil || dsnConfig.TLSConfig != "true" && dsnConfig.TLSConfig != mysqlCATLSConfig {
+			return c, errors.New("production MySQL DSN requires verified TLS (tls=true, or tls=" + mysqlCATLSConfig + " with MYSQL_CA_CERT)")
 		}
 	}
 	if c.AIReview {
@@ -275,4 +282,31 @@ func (c Config) ClientIP(remoteAddr, forwardedFor string) string {
 		}
 	}
 	return host
+}
+
+// mysqlCATLSConfig names the DSN tls= mode that verifies the server against a
+// CA given in MYSQL_CA_CERT instead of the system roots. A managed MySQL
+// usually presents a certificate signed by a private CA, and the stock mysql
+// image presents one carrying no name at all, which tls=true can never match.
+// This mode changes which CA is trusted, never whether the certificate is
+// checked: the chain is verified and ServerName keeps the hostname check that
+// tls=true would have done. A missing or unparsable CA is refused, so the mode
+// cannot decay into an unverified connection.
+const mysqlCATLSConfig = "docping-ca"
+
+func (c Config) registerMySQLCA() error {
+	if c.MySQLCACert == "" {
+		if strings.Contains(c.DSN, "tls="+mysqlCATLSConfig) {
+			return errors.New("MYSQL_DSN with tls=" + mysqlCATLSConfig + " requires MYSQL_CA_CERT")
+		}
+		return nil
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM([]byte(c.MySQLCACert)) {
+		return errors.New("MYSQL_CA_CERT must be a PEM-encoded certificate")
+	}
+	// ServerName is deliberately left empty: the driver fills it with the host
+	// from the DSN, so the hostname is checked against the address actually
+	// dialled rather than one restated here.
+	return mysql.RegisterTLSConfig(mysqlCATLSConfig, &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12})
 }

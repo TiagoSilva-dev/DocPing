@@ -1,9 +1,16 @@
 package app
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 func TestCanonicalOriginNormalizesAndRejects(t *testing.T) {
@@ -215,5 +222,75 @@ func TestLoadConfigLeavesAnalysisOffByDefault(t *testing.T) {
 	}
 	if c.AIReview {
 		t.Fatal("análise automática ligada sem configuração explícita")
+	}
+}
+
+// selfSignedCA returns a PEM certificate usable as a trust anchor, so the test
+// exercises the real parse instead of a stub.
+func selfSignedCA(t *testing.T) string {
+	t.Helper()
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	template := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "DocPing Test CA"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(time.Hour),
+		IsCA:                  true,
+		KeyUsage:              x509.KeyUsageCertSign,
+		BasicConstraintsValid: true,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, template, template, pub, priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))
+}
+
+func productionBase() map[string]string {
+	return map[string]string{
+		"APP_ENV": "production", "STORE_DRIVER": "mysql", "WEB_ORIGIN": "https://app.example.com",
+		"MYSQL_DSN":   "u:p@tcp(mysql.railway.internal:3306)/docping?tls=true",
+		"S3_ENDPOINT": "https://s3.example.com", "S3_ACCESS_KEY": "a", "S3_SECRET_KEY": "s",
+		"CLAMAV_ADDRESS": "clamav:3310", "SMTP_HOST": "smtp.example.com", "SMTP_FROM": "no-reply@example.com",
+		"MYSQL_CA_CERT": "", "ALLOW_UNSCANNED_UPLOADS": "", "AI_REVIEW_ENABLED": "",
+	}
+}
+
+// The CA-pinned mode exists so a managed MySQL whose certificate no public root
+// signs can still be verified. It must never become a way around verification:
+// without a parsable CA the configuration is refused, and skip-verify stays
+// refused as it always was.
+func TestLoadConfigVerifiesMySQLTLSAgainstASuppliedCA(t *testing.T) {
+	ca := selfSignedCA(t)
+	caDSN := "u:p@tcp(mysql.railway.internal:3306)/docping?tls=docping-ca"
+	for name, tc := range map[string]struct {
+		override map[string]string
+		accepted bool
+	}{
+		"tls=true segue aceito":      {map[string]string{}, true},
+		"CA informada e válida":      {map[string]string{"MYSQL_DSN": caDSN, "MYSQL_CA_CERT": ca}, true},
+		"modo CA sem CA":             {map[string]string{"MYSQL_DSN": caDSN}, false},
+		"CA ilegível":                {map[string]string{"MYSQL_DSN": caDSN, "MYSQL_CA_CERT": "nao sou PEM"}, false},
+		"skip-verify segue recusado": {map[string]string{"MYSQL_DSN": "u:p@tcp(h:3306)/d?tls=skip-verify", "MYSQL_CA_CERT": ca}, false},
+		"sem TLS segue recusado":     {map[string]string{"MYSQL_DSN": "u:p@tcp(h:3306)/d"}, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			for k, v := range productionBase() {
+				t.Setenv(k, v)
+			}
+			for k, v := range tc.override {
+				t.Setenv(k, v)
+			}
+			_, err := LoadConfig()
+			if tc.accepted && err != nil {
+				t.Fatalf("configuração válida recusada: %v", err)
+			}
+			if !tc.accepted && err == nil {
+				t.Fatal("configuração sem TLS verificado foi aceita")
+			}
+		})
 	}
 }
