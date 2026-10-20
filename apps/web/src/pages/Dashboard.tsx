@@ -345,7 +345,7 @@ export function Dashboard() {
                   cy="38"
                   r="32"
                   fill="none"
-                  stroke="#d7e3cf"
+                  stroke="#dfdfdf"
                   strokeWidth="5"
                 />
                 <circle
@@ -353,7 +353,7 @@ export function Dashboard() {
                   cy="38"
                   r="32"
                   fill="none"
-                  stroke="#6f9260"
+                  stroke="var(--accent)"
                   strokeWidth="5"
                   strokeLinecap="round"
                   strokeDasharray={`${pct * 2.01} 201`}

@@ -221,6 +221,13 @@ func (a *App) review(c *call) (any, error) {
 			}
 		}
 		item.Reviews = append(item.Reviews, domain.Review{Action: in.Action, Reason: in.Reason, UserID: c.User.ID, CreatedAt: domain.Now()})
+		// A person reviewing the item settles it: drop the pending analysis
+		// verdict so the panel never shows a contradicting suggestion.
+		for j := range item.Files {
+			if item.Files[j].Analysis != nil && item.Files[j].Analysis.Status == "queued" {
+				item.Files[j].Analysis = nil
+			}
+		}
 		if in.Action == "approve" {
 			item.Status = "approved"
 			item.CorrectionReason = ""
@@ -279,7 +286,7 @@ func (a *App) portal(c *call) (any, error) {
 	}
 	o := c.S.Organizations[r.OrgID]
 	client := c.S.Clients[r.ClientID]
-	return map[string]any{"environment": a.Config.Env, "request": domain.PublicRequest(r), "maxUploadBytes": a.Config.MaxUpload, "organization": map[string]any{"name": o.Name, "demo": o.Demo}, "client": map[string]string{"name": client.Name}}, nil
+	return map[string]any{"environment": a.Config.Env, "request": domain.PortalRequest(r), "maxUploadBytes": a.Config.MaxUpload, "organization": map[string]any{"name": o.Name, "demo": o.Demo}, "client": map[string]string{"name": client.Name}}, nil
 }
 func (a *App) portalCode(c *call) (any, error) {
 	t, r, err := c.publicToken(false)
@@ -292,8 +299,16 @@ func (a *App) portalCode(c *call) (any, error) {
 	if !r.Sensitive {
 		return nil, invalid("Esta solicitação não exige código.")
 	}
-	if !expired(t.CodeExpiresAt) {
-		return nil, fail(429, "code_recent", "Aguarde o código enviado ou tente novamente em dez minutos.")
+	// A client who lost the message must be able to ask for another one without
+	// waiting out the full ten minutes of validity. The first few retries are a
+	// minute apart; after that the wait grows so the endpoint cannot be used to
+	// flood the client's inbox.
+	cooldown, message := time.Minute, "Acabamos de enviar um código. Aguarde um minuto para pedir outro."
+	if t.CodeSends >= 3 {
+		cooldown, message = 10*time.Minute, "Já enviamos vários códigos. Aguarde dez minutos ou fale com o escritório."
+	}
+	if sent, e := time.Parse(time.RFC3339, t.CodeSentAt); e == nil && time.Since(sent) < cooldown {
+		return nil, fail(429, "code_recent", message)
 	}
 	random := make([]byte, 4)
 	if _, err = rand.Read(random); err != nil {
@@ -303,6 +318,8 @@ func (a *App) portalCode(c *call) (any, error) {
 	code := fmt.Sprintf("%06d", n%1000000)
 	t.CodeHash = hash(code)
 	t.CodeExpiresAt = time.Now().Add(10 * time.Minute).UTC().Format(time.RFC3339)
+	t.CodeSentAt = domain.Now()
+	t.CodeSends++
 	t.CodeAttempts = 0
 	c.S.Tokens[t.Hash] = t
 	to := c.S.Clients[r.ClientID].Email
@@ -315,6 +332,10 @@ func (a *App) portalCode(c *call) (any, error) {
 				if current.CodeHash == hash(code) {
 					current.CodeHash = ""
 					current.CodeExpiresAt = ""
+					current.CodeSentAt = ""
+					if current.CodeSends > 0 {
+						current.CodeSends--
+					}
 					s.Tokens[t.Hash] = current
 				}
 				return nil
@@ -354,6 +375,8 @@ func (a *App) portalVerify(c *call) (any, error) {
 	t.VerifiedSessions[hash(raw)] = time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
 	http.SetCookie(c.W, &http.Cookie{Name: "docping_portal_" + t.Hash[:12], Value: raw, Path: "/api", HttpOnly: true, Secure: a.Config.Env == "production", SameSite: http.SameSiteLaxMode, MaxAge: 3600})
 	t.CodeHash = ""
+	t.CodeSends = 0
+	t.CodeSentAt = ""
 	c.S.Tokens[t.Hash] = t
 	return map[string]bool{"verified": true}, nil
 }

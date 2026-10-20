@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"docping/api/internal/analysis"
 	"docping/api/internal/domain"
 	"docping/api/internal/persistence"
 	"docping/api/internal/storage"
@@ -12,7 +13,6 @@ import (
 	"errors"
 	"io"
 	"log"
-	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -24,6 +24,10 @@ type App struct {
 	Store   *persistence.Store
 	Objects *storage.Objects
 	limiter limiter
+	// Analyzer and analysisJobs are nil unless AI_REVIEW_ENABLED is set, so
+	// an unconfigured deployment behaves exactly as it did before.
+	Analyzer     *analysis.Analyzer
+	analysisJobs chan analysisJob
 }
 type APIError struct {
 	Status        int
@@ -73,6 +77,7 @@ func (a *App) routes() http.Handler {
 	a.handle(m, "POST /api/requests/{id}/notify", true, true, a.notify)
 	a.handle(m, "POST /api/requests/{id}/cancel", true, true, a.cancel)
 	a.handle(m, "POST /api/requests/{requestID}/items/{itemID}/review", true, true, a.review)
+	a.handle(m, "POST /api/requests/{requestID}/items/{itemID}/analyze", true, true, a.analyze)
 	a.handle(m, "GET /api/portal/{token}", false, false, a.portal)
 	a.handle(m, "POST /api/portal/{token}/code", true, false, a.portalCode)
 	a.handle(m, "POST /api/portal/{token}/verify", true, false, a.portalVerify)
@@ -94,6 +99,19 @@ func (a *App) routes() http.Handler {
 	return a.security(m)
 }
 func (a *App) Handler() http.Handler { return a.routes() }
+
+// originError keeps the production message opaque while development names the
+// expected origin, which is the single most common cause of a blank screen on
+// a freshly configured machine.
+func (a *App) originError(origin string) error {
+	if a.Config.Env == "production" {
+		return fail(403, "origin_rejected", "Origem não permitida.")
+	}
+	if origin == "" {
+		return fail(403, "origin_rejected", "Origem não permitida. Abra o aplicativo em "+a.Config.Origin+" (requisição sem cabeçalho Origin e marcada como cross-site).")
+	}
+	return fail(403, "origin_rejected", "Origem não permitida: "+origin+". Abra o aplicativo em "+strings.Join(a.Config.AllowedOriginList(), " ou ")+", ou ajuste WEB_ORIGIN/WEB_ORIGINS.")
+}
 func (a *App) security(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -104,19 +122,29 @@ func (a *App) security(next http.Handler) http.Handler {
 		if a.Config.Env == "production" {
 			w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 		}
+		w.Header().Set("Vary", "Origin")
 		origin := r.Header.Get("Origin")
-		if origin != "" && origin != a.Config.Origin {
-			writeError(w, fail(403, "origin_rejected", "Origem não permitida."))
+		allowed := origin != "" && a.Config.AllowedOrigin(origin)
+		if origin != "" && !allowed {
+			// Logged with the rejected value because a mismatch between the
+			// browser address and WEB_ORIGIN is otherwise invisible from the
+			// response alone.
+			log.Printf("origin rejected: %q is not in the allowed set %v", origin, a.Config.AllowedOriginList())
+			writeError(w, a.originError(origin))
 			return
 		}
-		if r.Header.Get("Sec-Fetch-Site") == "cross-site" {
-			writeError(w, fail(403, "origin_rejected", "Origem não permitida."))
+		// An allowed Origin is this product's own app even when the browser
+		// labels it cross-site, which happens whenever the SPA and the API are
+		// served from different ports or hostnames. Writes still require the
+		// CSRF token, so the check only has to stop unidentified cross-site
+		// traffic.
+		if !allowed && r.Header.Get("Sec-Fetch-Site") == "cross-site" {
+			writeError(w, a.originError(origin))
 			return
 		}
-		if origin == a.Config.Origin {
+		if allowed {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
-			w.Header().Set("Vary", "Origin")
 		}
 		if r.Method == "OPTIONS" {
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-CSRF-Token")
@@ -134,7 +162,7 @@ func (a *App) security(next http.Handler) http.Handler {
 				group, max = "upload", 20
 			}
 		}
-		ip, _, _ := net.SplitHostPort(r.RemoteAddr)
+		ip := a.Config.ClientIP(r.RemoteAddr, r.Header.Get("X-Forwarded-For"))
 		if !a.limiter.Allow(group+":"+ip, max, time.Minute) {
 			w.Header().Set("Retry-After", "60")
 			writeError(w, fail(429, "rate_limited", "Muitas tentativas. Aguarde um minuto."))

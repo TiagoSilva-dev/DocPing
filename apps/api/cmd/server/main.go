@@ -35,6 +35,7 @@ func main() {
 	}
 	application := &app.App{Config: config, Store: store, Objects: objects}
 	server := &http.Server{Addr: ":" + config.Port, Handler: application.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 90 * time.Second, WriteTimeout: 120 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20}
+	application.StartAnalysis(ctx)
 	go application.StartWorker(ctx)
 	go func() {
 		<-ctx.Done()

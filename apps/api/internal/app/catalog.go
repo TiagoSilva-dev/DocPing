@@ -85,9 +85,20 @@ func (a *App) updateClient(c *call) (any, error) {
 	if !ok || old.OrgID != c.Org.ID {
 		return nil, missing()
 	}
-	var v domain.Client
-	if err := decode(c.R, &v); err != nil {
+	var in struct {
+		domain.Client
+		Active *bool `json:"active"`
+	}
+	in.Client = old
+	if err := decode(c.R, &in); err != nil {
 		return nil, err
+	}
+	// Archiving is a deliberate action, never the side effect of a payload that
+	// simply left "active" out.
+	v := in.Client
+	v.Active = old.Active
+	if in.Active != nil {
+		v.Active = *in.Active
 	}
 	if err := validateClient(&v); err != nil {
 		return nil, err
@@ -206,14 +217,23 @@ func (a *App) importClients(c *call) (any, error) {
 	}
 	return map[string]any{"clients": out, "errors": errs, "imported": imported}, nil
 }
+
+// templates returns archived models too, each carrying its `active` flag.
+// Filtering them out here left an archived model unreachable: it disappeared
+// from the only screen that lists models, so it could never be reactivated.
 func (a *App) templates(c *call) (any, error) {
 	out := []domain.Template{}
 	for _, v := range c.S.Templates {
-		if v.OrgID == c.Org.ID && v.Active {
+		if v.OrgID == c.Org.ID {
 			out = append(out, v)
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Active != out[j].Active {
+			return out[i].Active
+		}
+		return out[i].Name < out[j].Name
+	})
 	return out, nil
 }
 func (a *App) template(c *call) (any, error) {
@@ -267,9 +287,10 @@ func (a *App) updateTemplate(c *call) (any, error) {
 		return nil, missing()
 	}
 	var in struct {
-		Name, Description string
-		Items             []domain.TemplateItem
-		Active            *bool
+		Name        string
+		Description *string
+		Items       []domain.TemplateItem
+		Active      *bool
 	}
 	if err := decode(c.R, &in); err != nil {
 		return nil, err
@@ -286,7 +307,9 @@ func (a *App) updateTemplate(c *call) (any, error) {
 			old.Items[n].ID = domain.ID()
 		}
 	}
-	old.Description = in.Description
+	if in.Description != nil {
+		old.Description = *in.Description
+	}
 	if in.Active != nil {
 		old.Active = *in.Active
 	}
@@ -306,19 +329,30 @@ func (a *App) updateTemplate(c *call) (any, error) {
 	c.S.Audit(c.Org.ID, c.User.ID, "template.updated", old.ID)
 	return old, nil
 }
-func (a *App) organization(c *call) (any, error) { return c.Org, nil }
+func (a *App) organization(c *call) (any, error) {
+	o := c.Org
+	o.AIReview = domain.NormalizeAIReview(o.AIReview)
+	return o, nil
+}
 func (a *App) updateOrganization(c *call) (any, error) {
 	var in struct {
 		Name, Email      string
 		RemindersEnabled bool
 		ReminderDays     []int
 		RetentionDays    int
+		AIReview         string `json:"aiReview"`
 	}
 	if err := decode(c.R, &in); err != nil {
 		return nil, err
 	}
 	if !title(in.Name, 180) || in.Email != "" && !validEmail(in.Email) || in.RetentionDays < 30 || in.RetentionDays > 3650 || len(in.ReminderDays) > 5 {
 		return nil, invalid("Revise nome, e-mail e retenção de 30 a 3.650 dias.")
+	}
+	if in.AIReview == "" {
+		in.AIReview = "suggest"
+	}
+	if in.AIReview != "off" && in.AIReview != "suggest" && in.AIReview != "auto" {
+		return nil, invalid("A análise automática deve ser desativada, sugerida ou automática.")
 	}
 	sort.Ints(in.ReminderDays)
 	seen := map[int]bool{}
@@ -334,6 +368,7 @@ func (a *App) updateOrganization(c *call) (any, error) {
 	o.RemindersEnabled = in.RemindersEnabled
 	o.ReminderDays = in.ReminderDays
 	o.RetentionDays = in.RetentionDays
+	o.AIReview = in.AIReview
 	c.S.Organizations[o.ID] = o
 	c.S.Audit(o.ID, c.User.ID, "organization.updated", o.ID)
 	return o, nil

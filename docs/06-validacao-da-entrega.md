@@ -6,6 +6,8 @@ Registro de 19–20/10/2026, fuso America/Sao_Paulo. Todos os clientes, organiza
 
 O fluxo funcional implementado passou em testes de código e em **18 cenários contra serviços reais de desenvolvimento**. O frontend compila, é empacotado em container e responde via Nginx com o proxy da API funcionando. **A experiência visual/mobile ainda não foi validada no navegador; esta entrega não está liberada para documentos reais ou piloto pago.**
 
+Duas mudanças posteriores a este registro **não estão cobertas pelos números acima**: a conversão da paleta para preto/branco/cinza e a análise automática de documentos (Docling + PaddleOCR + Jev). Para elas, veja "Mudanças posteriores" no fim deste documento.
+
 ## Evidências executadas
 
 | Verificação | Resultado | Alcance |
@@ -85,3 +87,63 @@ Executar e corrigir a suíte visual/teclado/mobile, testar dispositivos reais e 
 ## Encerramento do ambiente
 
 Ao final, o Vite/API de teste e os containers do projeto foram parados, preservando banco, objetos, mensagens, assinaturas e o `.env` local. Para retomar o pacote completo, execute `docker compose --profile web up -d` na raiz e abra `http://localhost:5173`. O Docker Desktop de uso geral não foi encerrado, e serviços de outros projetos não foram alterados.
+
+## Mudanças posteriores a 20/10/2026
+
+### Paleta neutra
+
+Conversão mecânica das 692 cores em uso para uma escala neutra preservando a luminância de cada tom, com os tokens de estado (aprovado, em revisão, correção, erro) mantidos em matiz. `npm run check`, `npm test` e `npm run build` passaram depois da conversão.
+
+**Não validado:** contraste medido nos pares efetivamente renderizados, aparência em navegador e em telas móveis, e revisão visual das sete folhas de estilo. A conversão é determinística, mas não substitui olhar as telas.
+
+### Análise automática de documentos
+
+| Verificação | Resultado | Alcance |
+|---|---|---|
+| `go test ./internal/analysis` | Passou | Composição do veredito, truncamento, normalização de confiança e os três clientes HTTP contra `httptest` |
+| `go test ./internal/app -run Analysis` | Passou | Worker: aplica em `auto`, apenas registra em `suggest`, não aplica com modo ausente, não aprova em falha, não sobrepõe decisão humana, não vaza a análise ao portal |
+| `go test -race ./...` | Passou | Conjunto completo, sem corrida reportada |
+| `go vet ./...` | Passou | Análise estática |
+| `docker compose config` | Passou | Serviços `docling` e `paddleocr` sob o perfil `ai` |
+| `npm run check` / `npm test` / `npm run build` | Passaram | Tipos, 10 testes de lógica pura e empacotamento com o painel de análise |
+
+#### Execução contra serviços reais, 20/10/2026
+
+O pipeline completo foi executado com Docling real (`quay.io/docling-project/docling-serve:v1.37.0`, container local, arm64 nativo) e a API da TypeSafe com chave real. Documentos sintéticos, gerados para o teste.
+
+| Cenário | Entrada | Veredito | Aplicado | Resultado |
+|---|---|---|---|---|
+| Documento errado | DAS da "ACME" num item que pedia *Notas fiscais* da "Horizonte Arquitetura" | `rejected` conf. 0,76 | Sim | Item → `correction_required` com motivo; `tipo_correto` 0,16 e `titular` divergente conf. 1,00 |
+| Documento correto, porém incerto | NFS-e da Horizonte, layout achatado | `review` conf. 0,50 | Não | Item permaneceu `uploaded`; `integridade` 0,76 abaixo do piso 0,85 |
+| Documento correto e completo | Extrato bancário da Lima Consultoria, 09/2026 | `approved` conf. 0,76 | Sim | Item → `approved`; todos os sinais ≥ 0,94, exceto `problema` em 0,76 |
+
+Medições: Docling converteu o PDF de texto em **0,84 s**; a chamada ao Jev consumiu **704 tokens de entrada** no exemplo isolado. A imagem do Docling ocupa **15,4 GB**. A resposta real (`jev-1.13.0`) bate campo a campo com o que o cliente Go desserializa.
+
+Os três caminhos do fluxo se comportaram como projetado, incluindo a escalada: o caso intermediário **não** foi aprovado automaticamente.
+
+**Não validado, e necessário antes de ligar o modo automático em um escritório:**
+
+1. O container `paddleocr` **não foi construído**. As versões fixadas em `infra/paddleocr.Dockerfile` não foram verificadas contra o índice do PyPI, e o caminho de fallback do `Chain` só tem cobertura por teste de unidade. Na prática o Docling já faz OCR, então o fluxo funciona sem ele.
+2. Nenhum teste com documento **digitalizado ou fotografado**. Todos os PDFs do teste têm camada de texto, então o OCR propriamente dito nunca foi exercitado — só o parser.
+3. Os limiares continuam **sem calibração**. A amostra foi de três documentos sintéticos, o que não mede taxa de falso positivo nem de falso negativo. O caso 2 mostra que o piso de integridade reprova documentos legítimos de layout incomum; em um escritório real isso significa fila de revisão maior que o necessário. **`suggest` continua sendo o modo defensável até existir uma amostra real medida.**
+4. Acurácia, latência e custo por documento em volume real seguem sem medição. O teste usou PDFs de 1 a 2 KB.
+5. O envio de conteúdo extraído a um serviço externo não foi avaliado sob a ótica de LGPD nem incluído nos gates de `docs/05-seguranca-e-piloto.md`.
+6. O painel de análise não foi visto em navegador.
+
+## Lacuna conhecida: retenção não é aplicada
+
+`Organization.RetentionDays` é validado (30 a 3650 dias), persistido e editável em
+Configurações, **mas nenhum job o aplica**. Não existe expurgo de documentos vencidos:
+as únicas chamadas a `Objects.Delete` removem objetos órfãos quando um upload falha.
+
+Na prática, hoje o ajuste não produz efeito algum. Isso tem duas consequências:
+
+1. A interface promete ao usuário um controle que não existe. Enquanto não houver
+   expurgo, o campo não deveria sugerir descarte automático.
+2. A landing page **não** afirma que documentos são descartados no fim do prazo — a
+   afirmação foi removida em 20/10/2026, justamente por não ser verdadeira. Não a
+   reintroduza antes de o job existir.
+
+Implementar o expurgo exige decidir o que acontece com solicitações concluídas, se o
+registro de auditoria sobrevive ao documento e se o escritório é avisado antes. Até lá,
+trate a retenção como declaração de intenção, não como garantia.

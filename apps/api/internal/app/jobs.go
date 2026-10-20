@@ -6,12 +6,23 @@ import (
 	"docping/api/internal/domain"
 	"errors"
 	"fmt"
+	"mime"
 	"net"
 	"net/smtp"
 	"strings"
 	"time"
 )
 
+// messageIDDomain takes the sender's domain so the Message-ID a provider sees
+// belongs to the sending domain. Subjects carry accents and an em dash, so the
+// header has to be RFC 2047 encoded instead of written as raw UTF-8 bytes,
+// which some providers reject and others deliver as mojibake.
+func messageIDDomain(from string) string {
+	if n := strings.LastIndex(from, "@"); n >= 0 && n+1 < len(from) {
+		return from[n+1:]
+	}
+	return "docping.invalid"
+}
 func (a *App) sendEmail(to, subject, body string) error {
 	if a.Config.SMTPHost == "" || a.Config.SMTPFrom == "" {
 		return errors.New("e-mail não configurado")
@@ -53,7 +64,7 @@ func (a *App) sendEmail(to, subject, body string) error {
 	if err != nil {
 		return errors.New("provedor recusou a mensagem")
 	}
-	message := "From: " + a.Config.SMTPFrom + "\r\nTo: " + to + "\r\nSubject: " + subject + "\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n" + body + "\r\n"
+	message := "From: " + a.Config.SMTPFrom + "\r\nTo: " + to + "\r\nSubject: " + mime.QEncoding.Encode("utf-8", subject) + "\r\nDate: " + time.Now().Format(time.RFC1123Z) + "\r\nMessage-ID: <" + domain.ID() + "@" + messageIDDomain(a.Config.SMTPFrom) + ">\r\nAuto-Submitted: auto-generated\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n" + body + "\r\n"
 	if _, err = data.Write([]byte(message)); err != nil {
 		return errors.New("falha no envio ao provedor")
 	}
@@ -161,6 +172,18 @@ func (a *App) notify(c *call) (any, error) {
 	c.S.Audit(c.Org.ID, c.User.ID, "notification.requested", r.ID)
 	return d, nil
 }
+
+// awaitingClient reports whether any item of the request still needs an upload
+// from the client: a required item never sent, or any item sent back for
+// correction.
+func awaitingClient(r domain.Request) bool {
+	for _, item := range r.Items {
+		if item.Status == "correction_required" || item.Status == "pending" && item.Required {
+			return true
+		}
+	}
+	return false
+}
 func (a *App) tick(ctx context.Context, now time.Time) {
 	effects := []func() error{}
 	err := a.Store.Run(ctx, true, func(s *domain.State) error {
@@ -232,6 +255,12 @@ func (a *App) tick(ctx context.Context, now time.Time) {
 		for _, r := range s.Requests {
 			o := s.Organizations[r.OrgID]
 			if !o.RemindersEnabled || o.Demo || r.Status == "completed" || r.Status == "cancelled" {
+				continue
+			}
+			// Only remind while the client still has something to do. A request
+			// whose documents are all in review is waiting on the office, and a
+			// reminder there reads as if the upload had not arrived.
+			if !awaitingClient(r) {
 				continue
 			}
 			created, err := time.Parse(time.RFC3339, r.CreatedAt)

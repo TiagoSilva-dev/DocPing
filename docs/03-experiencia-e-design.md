@@ -57,28 +57,29 @@ Não renderizar botões cuja ação ainda não exista. A apresentação de recur
 
 ## Sistema visual inicial
 
-Identidade: superfícies quentes, verde contábil discreto, texto denso com espaço suficiente para leitura. DM Sans para a interface; fonte de sistema como fallback. IBM Plex Mono é opcional em metadados técnicos, nunca necessária para compreender a tarefa. Ícones Lucide de um único estilo; ícones decorativos são ocultados de tecnologias assistivas.
+Identidade: superfícies neutras em preto, branco e cinza, texto denso com espaço suficiente para leitura. A interface não usa cor de marca: a cor fica reservada aos sinais de estado, de modo que verde, âmbar e vermelho signifiquem sempre a mesma coisa e sejam vistos de longe numa lista. Cor nunca é o único sinal — ícone e rótulo textual acompanham todo estado. DM Sans para a interface; fonte de sistema como fallback. IBM Plex Mono é opcional em metadados técnicos, nunca necessária para compreender a tarefa. Ícones Lucide de um único estilo; ícones decorativos são ocultados de tecnologias assistivas.
 
 | Token | Valor inicial | Aplicação |
 |---|---|---|
-| canvas | `#F8F9F6` | Fundo geral |
+| canvas | `#FAFAFA` | Fundo geral |
 | surface | `#FFFFFF` | Áreas de conteúdo e diálogos |
-| text | `#192D29` | Texto e títulos |
-| text-secondary | `#667970` | Apoio, sempre validar tamanho e contraste |
-| primary | `#216C5C` | Ação principal e foco |
-| primary-soft | `#DDE9E2` | Seleção sutil com texto escuro |
-| border | `#E3E9E4` | Divisores; controles podem exigir borda mais escura |
-| success | `#28634D` em `#EDF5EF` | Aprovado/concluído |
-| warning | `#82561D` em `#FBF1DD` | Prazo/correção, com rótulo textual |
-| danger | `#A64036` em `#FBEFEB` | Erro, falha e rejeição |
+| text | `#141414` | Texto e títulos |
+| text-secondary | `#6B6B6B` | Apoio, sempre validar tamanho e contraste |
+| primary | `#141414` | Ação principal e foco |
+| primary-soft | `#F0F0F0` | Seleção sutil com texto escuro |
+| border | `#E5E5E5` | Divisores; controles podem exigir borda mais escura |
+| success | `#3F7D4F` em `#EEF5EF` | Aprovado/concluído |
+| review | `#4A6A8A` em `#EEF2F7` | Aguardando revisão |
+| warning | `#A9701F` em `#FDF4E6` | Prazo/correção, com rótulo textual |
+| danger | `#A8453A` em `#FDF2F1` | Erro, falha e rejeição |
 | spacing | 4, 8, 12, 16, 24, 32, 48 px | Escala única; evitar valores casuais |
 | radius | 6 px campo, 10 px painel, 14 px diálogo | Arredondamento contido |
-| shadow | `0 4px 20px rgb(25 45 41 / 6%)` | Somente superfícies elevadas |
+| shadow | `0 5px 18px rgb(20 20 20 / 3%)` | Somente superfícies elevadas |
 | text-size | 12 metadado, 14 corpo compacto, 16 corpo/portal, 20/28/36 títulos | Corpo nunca reduzido para caber |
 | control | 40 px desktop, ≥44 px portal | Botões e campos com rótulos visíveis |
 | motion | 180 ms ease-out | Opacidade e deslocamentos pequenos; reduzir conforme preferência |
 
-Os tokens de status são ponto de partida, sujeitos à verificação de contraste da implementação. Hierarquia usa peso, alinhamento e espaço antes de adicionar cor. O progresso representa obrigatórios aprovados e mostra também a quantidade recebida, sem confundir “enviado” com “concluído”.
+A conversão da paleta anterior para a escala neutra preservou a luminância de cada tom, então a hierarquia tonal das telas continua a mesma; apenas os tokens de estado mantiveram matiz. Os tokens de status são ponto de partida, sujeitos à verificação de contraste da implementação — ainda não medida nos pares renderizados. Hierarquia usa peso, alinhamento e espaço antes de adicionar cor. O progresso representa obrigatórios aprovados e mostra também a quantidade recebida, sem confundir “enviado” com “concluído”.
 
 ## EasyUI
 

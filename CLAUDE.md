@@ -1,0 +1,189 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Commands
+
+```sh
+npm ci
+npm run dev          # Go API (:8080, JSON store) + Vite (:5173) together via scripts/dev.mjs
+npm run dev:web      # Vite only (expects an API; set API_PROXY_TARGET if not on :8080)
+npm run check        # tsc -b for apps/web
+npm run build        # tsc -b && vite build
+npm test             # vitest run (apps/web/src/**/*.test.ts)
+npm run test:e2e     # Playwright (apps/web/e2e); needs the real stack running
+```
+
+Go (from `apps/api`):
+
+```sh
+go test ./...
+go test -race ./...
+go vet ./...
+go test ./internal/app -run TestName -v                                   # single test
+MYSQL_TEST_DSN='<disposable-db-dsn>' go test ./internal/persistence -run MySQL -v   # opt-in
+```
+
+Full local stack (Docker: MySQL, MinIO, Mailpit, ClamAV) and the real-infrastructure
+smoke test:
+
+```sh
+cp -n .env.example .env   # replace change-me values
+docker compose up --build -d
+docker compose --profile web up --build -d          # also serve the web app via Nginx
+node scripts/integration-smoke.mjs --mysql --eicar  # 18 scenarios against real services
+```
+
+Vitest is `environment: node` — the unit tests cover pure logic (CSV parsing, date
+math, notification derivation), not components. Playwright projects are filtered by
+`@desktop` / `@mobile` tags in the spec titles.
+
+`npm run dev` forces `APP_ENV=development STORE_DRIVER=json ALLOW_UNSCANNED_UPLOADS=true`.
+Restart it after changing Go; Vite hot-reloads the frontend. Use `localhost:5173` exactly —
+the server validates the request origin against `WEB_ORIGIN`.
+
+## Architecture
+
+Modular Go monolith (`apps/api`) + React/TS SPA (`apps/web`). No microservices, no Redis,
+no external queue. Scheduled jobs and the document-analysis queue run in-process in the
+same binary.
+
+### API request pipeline
+
+`internal/app/server.go` is the spine. Every route is registered through
+`a.handle(mux, pattern, write, auth, fn)`, which wraps the handler in:
+
+1. `security` middleware — security headers, strict `Origin`/`Sec-Fetch-Site` check,
+   per-IP rate limiting by route group (`auth` 20/min, `upload` 20/min, `portal` 120/min,
+   `api` 600/min), panic recovery.
+2. A single `Store.Run(ctx, write, fn)` transaction. Handlers receive a `*call` holding
+   the whole mutable `domain.State` plus the resolved `User`/`Session`/`Org`.
+3. `authenticate` — `docping_session` cookie hashed into `State.Sessions`; write requests
+   additionally require a constant-time-compared `X-CSRF-Token`.
+4. Post-commit side effects: handlers append to `c.effects`, which run **after** the
+   transaction commits. All external I/O (SMTP in particular) belongs there, never inside
+   the transaction. See `prepareDelivery` in `jobs.go`: it persists a `pending` delivery,
+   then the effect records the provider's true result.
+
+Handlers return `(any, error)`; errors are `*APIError` created with
+`fail(status, code, message)` / `invalid(msg)` / `missing()`. Messages are user-facing
+**Portuguese**; unknown errors are logged without detail and returned as `internal_error`.
+Three routes bypass `a.handle` because they stream or do work outside a transaction:
+`uploadHTTP`, `file`, `export`.
+
+### Persistence
+
+`internal/persistence/store.go` exposes one abstraction: load the entire `domain.State`
+into memory for the duration of a transaction, let the handler mutate it, write it back.
+
+- `STORE_DRIVER=mysql` (production): read-only or `GET_LOCK`-serialized repeatable-read
+  transaction; tables carry relational ownership/uniqueness columns plus a `payload JSON`
+  aggregate snapshot. Migrations in `apps/api/migrations/001_initial.sql` are embedded and
+  applied at startup.
+- `STORE_DRIVER=json` (development only, enforced): atomic temp-file+rename write to
+  `apps/api/.data/state.json`, objects under `apps/api/.data/objects/`.
+
+This whole-state load is a deliberate, documented first iteration — see the "Desvio
+conhecido" section in `docs/02-arquitetura-e-dados.md`. Scoped SQL queries must replace it
+before scale; do not add features that depend on loading all state.
+
+### Files and uploads
+
+`internal/storage/storage.go` wraps private S3/MinIO (or a local dir in development) and
+the ClamAV protocol. The DB stores only opaque key, SHA-256, size, MIME and `scanStatus`;
+bytes never touch MySQL and objects are never public. Uploads read the body, detect the
+type by content *and* extension (`detectFile`: PDF/JPG/PNG/HEIC only) and scan **outside**
+the transaction; the commit re-checks identity, token validity, item state, content
+deduplication and quotas, and orphan objects are cleaned up on failure. The scanner fails
+closed: the only bypass is `ALLOW_UNSCANNED_UPLOADS=true` in development, which marks files
+`unscanned_development`.
+
+### Automated document analysis
+
+`internal/analysis` is a leaf package with no persistence: `Extractor` (Docling, with
+PaddleOCR as the fallback when under 240 characters come back), `Jev` (TypeSafe System
+One), and `Decide`, which composes the verdict in **code** from six typed judgements.
+`internal/app/analysis.go` owns the in-memory queue (2 workers, 256 slots) and the write
+transaction that stores — and in `auto` mode applies — the verdict.
+
+- Off unless `AI_REVIEW_ENABLED=true`. Then every upload still goes to a person.
+- All extraction and inference happens outside any transaction, like SMTP. The upload
+  commit only writes `analysis.status=queued`; enqueueing happens after it returns.
+- The model judges, `Decide` decides. A missing answer, a failed service or a
+  probability near 0.5 always lands on `review` — never on an automatic approval.
+- `saveAnalysis` re-checks everything inside the write transaction: a person who
+  reviewed the item while the worker ran always wins, and the late verdict is recorded
+  with `applied:false`.
+- `domain.PortalRequest` strips the analysis and the reviewer id — use it for every
+  portal response, including the upload one. `PublicRequest` is for office responses.
+- Thresholds are configuration and are uncalibrated. Do not present `auto` as validated;
+  see `docs/06-validacao-da-entrega.md`.
+
+### Config is the safety boundary
+
+`internal/app/config.go` refuses to start when `APP_ENV=production` lacks HTTPS origin,
+MySQL with `tls=true`, private S3, ClamAV or TLS SMTP, or when any development bypass is
+set. It likewise refuses `AI_REVIEW_ENABLED=true` without `TYPESAFE_API_KEY`, without an
+extractor URL, with a non-HTTPS TypeSafe endpoint, or with a confidence threshold outside
+0.5–1 — a threshold a typo turned into zero would approve every document. There is no
+automatic fallback from MySQL to JSON. Preserve this: new capabilities that weaken
+production must be rejected in `LoadConfig`, not defaulted.
+
+### Domain rules
+
+`internal/domain/models.go` holds the state machine and time rules.
+
+- Item status: `pending` → `uploaded` → `approved` | `correction_required`.
+  Request status is **derived**, never set directly: call `domain.Recalculate(&r)` after any
+  item change (`completed` only when every required item is approved; `cancelled` is sticky).
+- `Organization.AIReview` is `off`/`suggest`/`auto`; an organization stored before the
+  feature reads as `suggest` via `domain.NormalizeAIReview` — existing workspaces never
+  start deciding on their own. `Review.Source == "jev"` marks an automated decision and
+  carries no `UserID`.
+- A request snapshots its template items at creation time; editing a template must not
+  change existing requests.
+- Timestamps persist as UTC RFC3339 (`domain.Now()`). Competence is `YYYY-MM`, due dates are
+  civil dates, recurrence runs in `America/Sao_Paulo` via `MonthDay`/`NextExecution`
+  (day 31 clamps to the last day of short months — never add 30 days).
+- Recurrence is idempotent on schedule+client+competence; reminders reserve a delivery
+  before sending.
+- `domain.PublicRequest` strips `ObjectKey`/`SHA256` — use it for every portal response.
+- Every org-scoped entity carries `OrgID`; look requests up with `c.ownRequest(id)` and
+  never trust a client-supplied organization.
+
+### Frontend
+
+`App.tsx` owns routing (React Router) with every page lazy-loaded; `ProtectedLayout`
+gates on the `["session"]` TanStack Query. `lib/api.ts` is the only HTTP surface: it
+prefixes `/api`, sends `credentials: "same-origin"`, captures `csrfToken` from any
+response into a module-level variable and replays it as `X-CSRF-Token`, and throws
+`ApiError(code, message, status)`. Uploads use `XMLHttpRequest` (`uploadFile`) for real
+progress. TanStack Query owns remote data; React Hook Form + Zod validate auth forms only —
+everything else relies on authoritative server validation. Path alias `@/` → `apps/web/src`.
+
+Styling is Tailwind v4 (`@tailwindcss/vite`, no config file) with CSS custom properties
+declared in `src/styles.css` and per-page `*.css` files. The chrome is neutral — black,
+white and grey — and colour carries meaning only, through the tokens in `:root`:
+
+- `--accent` (indigo) marks automated analysis and the recommended plan. It is the one
+  non-status colour, and it never spreads to ordinary buttons, headers or navigation.
+- `--ok` / `--warn` / `--danger` / `--info` mark state: approved, correction, rejected or
+  error, and under review. Each has a `-soft` background, a `-border`, and an `-on-dark`
+  variant for the landing's dark section.
+
+Every token pair was checked at 4.5:1 against both white and its own soft background; keep
+new pairs at that bar. Colour is never the only signal — pair it with an icon, a dot, a
+label or a written number, as `AnalysisPanel` does by printing the confidence it also
+draws. Use the tokens rather than new hexes, and do not give the chrome a brand hue.
+`components/ui/` holds shadcn/EasyUI primitives installed via the registry and then
+customized — prefer extending them over pulling new dependencies.
+
+### Conventions
+
+- Code, comments and docs-in-code are English; all user-visible strings and `docs/` are
+  Portuguese (pt-BR).
+- `docs/api-contract.md` and `apps/api/openapi.json` document the implemented contract —
+  update them when routes change.
+- The README and `docs/06-validacao-da-entrega.md` are deliberately precise about what has
+  and has not been validated (Playwright/visual validation and production infra are still
+  pending). Do not upgrade those claims without running the checks.

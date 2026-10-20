@@ -13,5 +13,8 @@
     "check": "npm run check --workspace @docping/web",
     "test": "npm run test --workspace @docping/web",
     "test:e2e": "npm run test:e2e --workspace @docping/web --"
+  },
+  "dependencies": {
+    "fast-jev-compaction": "^0.4.1"
   }
 }

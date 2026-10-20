@@ -4,7 +4,9 @@ Base `/api`; JSON `camelCase`; IDs são strings opacas; instantes RFC3339 UTC; c
 
 ## Sessão e autenticação
 
-Sessão autenticada usa cookie `docping_session`, HttpOnly, SameSite=Lax, Secure em produção, validade de 24h; o servidor guarda somente SHA-256 do token. Mutações autenticadas exigem `X-CSRF-Token` obtido na sessão. API valida `Origin` contra `WEB_ORIGIN` e rejeita `Sec-Fetch-Site: cross-site`. Para desenvolvimento use o proxy `/api` do Vite; o cliente HTTP inclui `credentials: 'include'`. Rate limiting por IP usa o endereço da conexão, sem confiar em X-Forwarded-For; um proxy de produção precisa de política própria de rate limit.
+Sessão autenticada usa cookie `docping_session`, HttpOnly, SameSite=Lax, Secure em produção, validade de 24h; o servidor guarda somente SHA-256 do token. Mutações autenticadas exigem `X-CSRF-Token` obtido na sessão. API valida `Origin` contra a lista de origens permitidas e rejeita `Sec-Fetch-Site: cross-site` apenas quando o `Origin` não está nessa lista. A lista começa em `WEB_ORIGIN` (origem canônica, usada nos links) e aceita origens extras em `WEB_ORIGINS` (separadas por vírgula). Cada valor é normalizado para `esquema://host[:porta]`; caminho, query ou esquema diferente de http/https são erro de configuração na inicialização. Em desenvolvimento a lista também recebe os apelidos de loopback equivalentes (`localhost`, `127.0.0.1`, `[::1]`) e a porta da própria API, para que abrir o app em `127.0.0.1` não devolva `origin_rejected`; em produção a lista é exata e todas as origens precisam ser HTTPS. Em desenvolvimento a mensagem de 403 nomeia as origens aceitas; em produção permanece genérica.
+
+Rate limiting por IP usa o endereço da conexão. `X-Forwarded-For` só é considerado quando o par direto está em `TRUSTED_PROXY_CIDRS` (lista de IPs/CIDRs, vazia por padrão), tomando a primeira entrada fora dessas faixas; sem isso, todo o tráfego atrás de um proxy compartilharia um único limite. Para desenvolvimento use o proxy `/api` do Vite; o cliente HTTP inclui `credentials: 'include'`.
 
 `GET /session`, `POST /auth/register`, `POST /auth/login` e `POST /auth/demo` retornam:
 
@@ -36,17 +38,17 @@ Sessão autenticada usa cookie `docping_session`, HttpOnly, SameSite=Lax, Secure
 - `GET /clients`: `Client[]`, inclui arquivados.
 - `GET /clients/{id}`: `Client`.
 - `POST /clients`: `{name,cnpj?,contactName?,email?,phone?}` → `Client` ativo.
-- `PUT /clients/{id}`: objeto com os campos editáveis e `active`. Mantém ID/escritório/criação. Arquivar usa `active:false`.
+- `PUT /clients/{id}`: objeto com os campos editáveis. Campos ausentes do corpo mantêm o valor atual; enviar string vazia limpa o campo. Mantém ID/escritório/criação. Arquivar exige `active:false` explícito — omitir `active` nunca arquiva.
 - `POST /clients/import`: `{csv:string,commit:boolean}` → `{clients:Client[],errors:[{row:number,message:string}],imported:number}`. Cabeçalhos `name,cnpj,contactName,email,phone` ou `nome,cnpj,responsavel,email,telefone`; vírgula ou ponto e vírgula. Limite1000 linhas/JSON1MiB. `commit:false` valida/prévia; `commit:true` grava atomicamente apenas se não houver erros. Linha0 representa limite global. As IDs só são atribuídas na gravação.
 
 ## Modelos
 
 `Template` = `{id,organizationId,name,description,active,createdAt,items:TemplateItem[]}`. `TemplateItem` = `{id,name,instruction,required,maxFiles}`. De1 a30 itens, ao menos um obrigatório, maxFiles de1 a20, nome até180, instrução até1000. Itens têm ordem de array. Cada solicitação recebe cópia independente desses requisitos.
 
-- `GET /templates` → `Template[]` ativos.
+- `GET /templates` → `Template[]`, inclui arquivados, cada um com `active`; ativos primeiro, depois por nome. O cliente filtra: somente modelos ativos podem iniciar solicitação ou recorrência.
 - `GET /templates/{id}` → `Template`.
 - `POST /templates`: `{name,description,items}` → `Template`.
-- `PUT /templates/{id}`: `{name?,description?,items?,active?}` → `Template`; edição nunca altera solicitações anteriores. Arquivar usa `active:false`.
+- `PUT /templates/{id}`: `{name?,description?,items?,active?}` → `Template`; edição nunca altera solicitações anteriores. Campos ausentes mantêm o valor atual. Arquivar usa `active:false` e reativar `active:true`.
 
 ## Solicitações e revisão
 
@@ -54,9 +56,11 @@ Sessão autenticada usa cookie `docping_session`, HttpOnly, SameSite=Lax, Secure
 
 `RequestItem` = campos de TemplateItem + `{status,correctionReason?,correctionFileId?,files:DocumentFile[],reviews:Review[]}`.
 
-`DocumentFile` = `{id,name,mimeType,size,createdAt,scanStatus,superseded,sample?}`. Chaves de storage e hashes do conteúdo nunca saem da API. `scanStatus` é `clean`, `sample` (sintético) ou `unscanned_development` (somente bypass explícito no desenvolvimento). Histórico de arquivos substituídos permanece e usa `superseded:true`.
+`DocumentFile` = `{id,name,mimeType,size,createdAt,scanStatus,superseded,sample?,analysis?}`. Chaves de storage e hashes do conteúdo nunca saem da API. `scanStatus` é `clean`, `sample` (sintético) ou `unscanned_development` (somente bypass explícito no desenvolvimento). Histórico de arquivos substituídos permanece e usa `superseded:true`.
 
-`Review` = `{action:'approve'|'correct',reason?,userId,createdAt}`. Estados de item: `pending,uploaded,approved,correction_required`. Estado de solicitação é derivado, com prioridade correção/revisão, e inclui `pending,in_progress,under_review,correction_required,completed,cancelled`. `under_review` significa que existe documento para analisar, mesmo que outros estejam pendentes. Obrigatórios aprovados concluem somente se nenhum item enviado aguarda revisão/correção; opcionais sem envio não impedem conclusão. Encerradas não aceitam uploads.
+`Review` = `{action:'approve'|'correct',reason?,source?,userId,createdAt}`. `source:'jev'` identifica decisão tomada pela análise automática; nesse caso `userId` é vazio.
+
+`Analysis` = `{status,verdict?,confidence,reason?,signals?,extractor?,model?,characters?,applied,error?,requestedAt?,completedAt?}`. `status` é `queued,running,completed,failed,disabled`; `verdict` é `approved,review,rejected`. `AnalysisSignal` = `{key,label,kind:'noul'|'score'|'choice',answer?,value,confidence}`. A análise só aparece em respostas do escritório: `PortalRequest` a remove, junto com o `userId` das revisões. Estados de item: `pending,uploaded,approved,correction_required`. Estado de solicitação é derivado, com prioridade correção/revisão, e inclui `pending,in_progress,under_review,correction_required,completed,cancelled`. `under_review` significa que existe documento para analisar, mesmo que outros estejam pendentes. Obrigatórios aprovados concluem somente se nenhum item enviado aguarda revisão/correção; opcionais sem envio não impedem conclusão. Encerradas não aceitam uploads.
 
 - `GET /requests` → `Request[]` ordenadas por atividade desc; frontend filtra localmente.
 - `POST /requests`: `{clientIds:string[],templateId,title,competence,dueDate,items?:TemplateItem[],recurring?:boolean,sensitive?:boolean}` → `Request[]`. Lote atômico, clientes ativos do escritório. `items` substitui a cópia do modelo para este lote. `recurring:true` também cria agenda mensal, mesmo dia local de hoje, vencimento baseado no prazo informado. A agenda preserva o snapshot dos itens usados, inclusive customizações pontuais, e a classificação sensível. Alterar o modelo não muda uma agenda já configurada; selecionar outro modelo na agenda cria um novo snapshot. `sensitive:true` exige cliente com e-mail e confirmação por código no portal.
@@ -65,15 +69,16 @@ Sessão autenticada usa cookie `docping_session`, HttpOnly, SameSite=Lax, Secure
 - `POST /requests/{id}/revoke`: revoga todos os links existentes; novo compartilhamento emite outro.
 - `POST /requests/{id}/cancel`: cancela, revoga links, preserva arquivos/histórico. Concluída não pode ser cancelada.
 - `POST /requests/{requestID}/items/{itemID}/review`: `{action:'approve'|'correct',reason?,fileId?}` → `Request`. Só item `uploaded` pode ser revisado; motivo obrigatório para correção, até1000. Com vários arquivos ativos, `fileId` deve identificar o arquivo afetado; com apenas um ele é selecionado automaticamente. Somente esse arquivo é substituído no reenvio; os demais permanecem ativos. Correção gera tentativa real de e-mail, resultado visível em notificações.
+- `POST /requests/{requestID}/items/{itemID}/analyze` → `Request`. Reenfileira a análise automática do arquivo ativo do item. Exige `AI_REVIEW_ENABLED=true` no servidor e `aiReview` diferente de `off` na organização (`409 analysis_disabled`); só item `uploaded` com arquivo liberado pelo antivírus (`409 invalid_transition` / `409 file_quarantined`). O enfileiramento ocorre após o commit.
 - `POST /requests/{id}/notify`: `{channel:'email'|'whatsapp_opened'}` → `Delivery`. Só aceita solicitação aberta; limita repetição a1min. `accepted` significa aceitação SMTP, não entrega/leitura. `failed` inclui motivo sanitizado. WhatsApp manual registra exclusivamente `opened`.
 - `GET /requests/{id}/export`: ZIP autorizado dos arquivos atuais liberados; nomes saneados; mantém documentos privados. Sem arquivos retorna422.
 
 ## Portal e arquivos privados
 
 - `GET /portal/{token}` → `{environment:string,request:Request,organization:{name,demo},client:{name},maxUploadBytes:number}`. Link inválido, expirado, revogado ou solicitação cancelada retorna410.
-- `POST /portal/{token}/items/{itemID}/upload`: multipart campo `file` → `Request` atualizado. Limite padrão20MiB; valida extensão e assinatura PDF/JPEG/PNG/HEIC, nome saneado, SHA-256 para retry idempotente, limite por item. Leitura da conexão móvel, ClamAV síncrono e storage ocorrem fora da transação de banco. O commit revalida token, cookie sensível, estados e quotas; objetos sem metadados confirmados são removidos. Os bytes ficam privados antes de serem disponibilizados. Scanner indisponível/inconclusivo falha fechado; malware retorna422. Upload de correção marca somente o arquivo indicado pelo escritório como substituído; preserva os demais arquivos ativos e o histórico. HEIC é recebido/download; conversão para prévia não implementada.
+- `POST /portal/{token}/items/{itemID}/upload`: multipart campo `file` → `Request` atualizado. Limite padrão20MiB; valida extensão e assinatura PDF/JPEG/PNG/HEIC, nome saneado, SHA-256 para retry idempotente, limite por item. Leitura da conexão móvel, ClamAV síncrono e storage ocorrem fora da transação de banco. O commit revalida token, cookie sensível, estados e quotas; objetos sem metadados confirmados são removidos. Os bytes ficam privados antes de serem disponibilizados. Scanner indisponível/inconclusivo falha fechado; malware retorna422. Upload de correção marca somente o arquivo indicado pelo escritório como substituído; preserva os demais arquivos ativos e o histórico. HEIC é recebido/download; conversão para prévia não implementada. A validação de HEIC aceita as marcas ISO-BMFF que o iPhone grava (`heic`, `heix`, `heim`, `heis`, `hevc`, `hevx`, `hevm`, `hevs`, `mif1`, `msf1`), sempre exigindo extensão `.heic`; antes somente `heic`/`heix`/`hevc`/`hevx` passavam, o que recusava fotos de versões recentes do iOS.
 - `GET /files/{fileID}`: arquivo com sessão do mesmo escritório **ou** `?token={portalToken}` pertencente exatamente à solicitação. Arquivo nunca é público no storage. PDF/JPEG/PNG inline; HEIC attachment. Range requests não são implementadas nesta primeira versão.
-- `POST /portal/{token}/code`: solicita código no e-mail do cliente; válido10min, no máximo cinco tentativas, reenvio após10min. Só para solicitações sensíveis. Escritórios de demonstração não emitem códigos/e-mails externos.
+- `POST /portal/{token}/code`: solicita código no e-mail do cliente; válido10min, no máximo cinco tentativas de conferência. O reenvio não espera o código expirar: os três primeiros envios ficam a um minuto de distância e, a partir daí, a espera passa a dez minutos (`429 code_recent`); uma confirmação bem-sucedida zera essa contagem. Só para solicitações sensíveis. Escritórios de demonstração não emitem códigos/e-mails externos.
 - `POST /portal/{token}/verify`: `{code}` → `{verified:boolean,message?}`. Confirmação vale1h para este navegador em cookie HttpOnly separado por link; apenas o hash da credencial é persistido. Outro navegador com o mesmo link continua exigindo código; tentativa inválida retorna200 com `verified:false` para persistir contador. GET/upload/download sensível retornam403 `identity_required` até confirmar. O frontend desta entrega pode não expor essa opção avançada.
 
 ## Recorrência, notificações e escritório
@@ -89,8 +94,26 @@ Sessão autenticada usa cookie `docping_session`, HttpOnly, SameSite=Lax, Secure
 - `GET /notifications` → `Delivery[]`: `{id,organizationId,requestId,channel,kind,status,error?,createdAt}`. Tentativas SMTP são persistidas como `pending` antes da chamada externa e o resultado é gravado após aceitação/falha. SMTP não mantém trava de banco; tentativas interrompidas por mais de5min viram `failed`, sem reenvio cego. Uma solicitação encerrada antes do despacho não é enviada.
 - `GET /audit` → eventos `{id,organizationId,userId?,action,entityId,createdAt}`; sem conteúdo documental/tokens/credenciais.
 - `GET /organization` → Organization.
-- `PUT /organization`: `{name,email,remindersEnabled,reminderDays,retentionDays}`. Dias únicos1..60, até5; retenção30..3650. `plan/clientLimit/demo` são controlados pelo servidor. Retenção é política registrada; eliminação automática e fluxo de direitos dos titulares ainda exigem implementação operacional antes de dados reais.
+- `PUT /organization`: `{name,email,remindersEnabled,reminderDays,retentionDays,aiReview}`. `aiReview` é `off`, `suggest` ou `auto`; omitido vira `suggest`. Dias únicos1..60, até5; retenção30..3650. `plan/clientLimit/demo` são controlados pelo servidor. Retenção é política registrada; eliminação automática e fluxo de direitos dos titulares ainda exigem implementação operacional antes de dados reais.
 - `GET /health` → `{status:'ok'}` significa processo atendendo, sem alegar integridade de integrações externas.
+
+## Análise automática de documentos
+
+Desligada por padrão. Sem `AI_REVIEW_ENABLED=true` nenhum arquivo é analisado e todo documento continua indo para revisão humana — o comportamento anterior, sem mudança.
+
+Pipeline, sempre **fora** da transação de upload e após o commit: o arquivo aceito é enfileirado em uma fila em memória do próprio binário (sem Redis, sem fila externa, dois workers, 256 jobs; fila cheia descarta o job e o escritório pode pedir de novo). O worker extrai o texto com Docling (`POST /v1/convert/file`, Markdown, OCR ligado) e, se o resultado tiver menos de240 caracteres, repete com PaddleOCR (`POST /ocr`, PaddleX), que é o caso da foto de documento sem camada de texto. O texto é truncado em `AI_MAX_CHARS` preservando início e fim, com marcação explícita do corte.
+
+O texto vira estado de uma única chamada ao TypeSafe System One (`POST /v1/systemone`) com seis julgamentos independentes: `tipo_correto` (noul), `integridade` (noul), `legibilidade` (score0..3), `competencia` (choice), `titular` (choice) e `problema` (choice). O modelo julga; **a decisão é composta em código** em `internal/analysis/review.go`:
+
+- **Reprovado** quando há impedimento declarado com confiança ≥ `AI_REJECT_CONFIDENCE`, quando `tipo_correto` ≤0,20, ou quando a legibilidade é nula com confiança. O motivo é a frase em português que o cliente lê no portal.
+- **Aprovado** apenas quando todos os critérios concordam: tipo ≥0,90, integridade ≥0,85, legibilidade ≥2,0 e competência/titular/problema com confiança ≥ `AI_APPROVE_CONFIDENCE`. `competencia`/`titular` com resposta `ausente` não impedem aprovação, porque muitos documentos válidos não os informam.
+- **Revisão** em todo o resto, incluindo resposta faltando, análise falhada ou probabilidade próxima de0,5. Falha de extração ou do modelo nunca aprova nada.
+
+Aplicar o veredito depende da organização: `auto` move o item (aprova, ou marca `correction_required` com o motivo e dispara o e-mail de correção como efeito pós-commit); `suggest` apenas registra. Tudo é revalidado dentro da transação de escrita — pessoa que revisou antes do worker terminar prevalece, e o veredito tardio fica somente registrado (`applied:false`). Organização gravada antes do recurso lê como `suggest`.
+
+`GET /audit` registra `analysis.requested`, `analysis.completed`/`analysis.failed` e, quando aplicado, `item.approve`/`item.correct` sem `userId`.
+
+Limites conhecidos: os limiares são ponto de partida e precisam ser calibrados nos documentos do próprio escritório; a fila é em memória e um reinício perde jobs enfileirados (o item permanece `uploaded`, visível para revisão); o veredito é sobre o texto extraído, não sobre a imagem — assinatura, carimbo e adulteração visual não são verificados.
 
 ## Persistência e limites desta entrega
 

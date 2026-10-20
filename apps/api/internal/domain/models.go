@@ -17,13 +17,16 @@ func ID() string {
 func Now() string { return time.Now().UTC().Format(time.RFC3339) }
 
 type Organization struct {
-	Email            string `json:"email"`
-	ID               string `json:"id"`
-	Name             string `json:"name"`
-	Demo             bool   `json:"demo"`
-	ClientLimit      int    `json:"clientLimit"`
-	Plan             string `json:"plan"`
-	RetentionDays    int    `json:"retentionDays"`
+	Email         string `json:"email"`
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Demo          bool   `json:"demo"`
+	ClientLimit   int    `json:"clientLimit"`
+	Plan          string `json:"plan"`
+	RetentionDays int    `json:"retentionDays"`
+	// AIReview is off, suggest or auto. Auto lets a confident Jev verdict move
+	// the item itself; suggest only records the verdict for a person to act on.
+	AIReview         string `json:"aiReview"`
 	ReminderDays     []int  `json:"reminderDays"`
 	RemindersEnabled bool   `json:"remindersEnabled"`
 	CreatedAt        string `json:"createdAt"`
@@ -72,19 +75,56 @@ type Template struct {
 	CreatedAt   string         `json:"createdAt"`
 }
 type DocumentFile struct {
-	ID         string `json:"id"`
-	Name       string `json:"name"`
-	MIMEType   string `json:"mimeType"`
-	Size       int64  `json:"size"`
-	CreatedAt  string `json:"createdAt"`
-	ScanStatus string `json:"scanStatus"`
-	ObjectKey  string `json:"objectKey,omitempty"`
-	SHA256     string `json:"sha256,omitempty"`
-	Superseded bool   `json:"superseded"`
-	Sample     bool   `json:"sample,omitempty"`
+	ID         string    `json:"id"`
+	Name       string    `json:"name"`
+	MIMEType   string    `json:"mimeType"`
+	Size       int64     `json:"size"`
+	CreatedAt  string    `json:"createdAt"`
+	ScanStatus string    `json:"scanStatus"`
+	ObjectKey  string    `json:"objectKey,omitempty"`
+	SHA256     string    `json:"sha256,omitempty"`
+	Superseded bool      `json:"superseded"`
+	Sample     bool      `json:"sample,omitempty"`
+	Analysis   *Analysis `json:"analysis,omitempty"`
+}
+
+// AnalysisSignal keeps one Jev judgement verbatim. Storing the raw answers,
+// not only the verdict, lets the office see why a document was approved or
+// sent back, and lets a changed policy be re-applied without paying for
+// inference again.
+type AnalysisSignal struct {
+	Key        string  `json:"key"`
+	Label      string  `json:"label"`
+	Kind       string  `json:"kind"`
+	Answer     string  `json:"answer,omitempty"`
+	Value      float64 `json:"value"`
+	Confidence float64 `json:"confidence"`
+}
+
+// Analysis is the automated conformity check of a single uploaded file:
+// extraction (Docling, PaddleOCR as the OCR fallback) followed by Jev.
+// Status is queued, running, completed, failed or disabled; Verdict is
+// approved, review or rejected. A failed analysis never decides anything —
+// the item stays waiting for a person.
+type Analysis struct {
+	Status      string           `json:"status"`
+	Verdict     string           `json:"verdict,omitempty"`
+	Confidence  float64          `json:"confidence"`
+	Reason      string           `json:"reason,omitempty"`
+	Signals     []AnalysisSignal `json:"signals,omitempty"`
+	Extractor   string           `json:"extractor,omitempty"`
+	Model       string           `json:"model,omitempty"`
+	Characters  int              `json:"characters,omitempty"`
+	Applied     bool             `json:"applied"`
+	Error       string           `json:"error,omitempty"`
+	RequestedAt string           `json:"requestedAt,omitempty"`
+	CompletedAt string           `json:"completedAt,omitempty"`
 }
 type Review struct {
-	Action    string `json:"action"`
+	Action string `json:"action"`
+	// Source is empty for a person and "jev" when the automated analysis
+	// applied the decision, so the history never attributes it to a user.
+	Source    string `json:"source,omitempty"`
 	Reason    string `json:"reason,omitempty"`
 	UserID    string `json:"userId"`
 	CreatedAt string `json:"createdAt"`
@@ -123,6 +163,8 @@ type PublicToken struct {
 	VerifiedSessions map[string]string `json:"verifiedSessions,omitempty"`
 	CodeHash         string            `json:"codeHash,omitempty"`
 	CodeExpiresAt    string            `json:"codeExpiresAt,omitempty"`
+	CodeSentAt       string            `json:"codeSentAt,omitempty"`
+	CodeSends        int               `json:"codeSends,omitempty"`
 	CodeAttempts     int               `json:"codeAttempts,omitempty"`
 }
 type Schedule struct {
@@ -191,9 +233,35 @@ type State struct {
 func NewState() *State {
 	return &State{Organizations: map[string]Organization{}, Users: map[string]User{}, Sessions: map[string]Session{}, Clients: map[string]Client{}, Templates: map[string]Template{}, Requests: map[string]Request{}, Tokens: map[string]PublicToken{}, Schedules: map[string]Schedule{}, Runs: map[string]ScheduleRun{}, Deliveries: map[string]Delivery{}, Audits: map[string]Audit{}, Resets: map[string]PasswordReset{}}
 }
+
+// AIReviewModes are the automated-review settings an organization may choose.
+// An organization stored before the feature existed reads as suggest: an
+// existing workspace never starts deciding on its own without being asked.
+const (
+	AIReviewOff     = "off"
+	AIReviewSuggest = "suggest"
+	AIReviewAuto    = "auto"
+)
+
+// NormalizeAIReview resolves the stored value, including the empty one.
+func NormalizeAIReview(mode string) string {
+	switch mode {
+	case AIReviewOff, AIReviewSuggest, AIReviewAuto:
+		return mode
+	}
+	return AIReviewSuggest
+}
 func (s *State) Audit(org, user, action, id string) {
 	a := Audit{ID: ID(), OrgID: org, UserID: user, Action: action, EntityID: id, CreatedAt: Now()}
 	s.Audits[a.ID] = a
+}
+func approvedAll(items []RequestItem) bool {
+	for _, i := range items {
+		if i.Status != "approved" {
+			return false
+		}
+	}
+	return true
 }
 func Recalculate(r *Request) {
 	if r.Status == "cancelled" {
@@ -220,6 +288,10 @@ func Recalculate(r *Request) {
 	switch {
 	case required > 0 && approved == required && !uploaded && !correction:
 		r.Status = "completed"
+	// A snapshot can hold only optional items, so completion also has to be
+	// reachable when every item was approved and none is required.
+	case required == 0 && len(r.Items) > 0 && approvedAll(r.Items):
+		r.Status = "completed"
 	case correction:
 		r.Status = "correction_required"
 	case uploaded:
@@ -229,6 +301,22 @@ func Recalculate(r *Request) {
 	default:
 		r.Status = "pending"
 	}
+}
+
+// PortalRequest is what the client outside the office may see. On top of the
+// object identity PublicRequest removes, it hides the automated analysis: the
+// client reads the correction reason, never the internal signals or scores.
+func PortalRequest(r Request) Request {
+	r = PublicRequest(r)
+	for n := range r.Items {
+		for j := range r.Items[n].Files {
+			r.Items[n].Files[j].Analysis = nil
+		}
+		for j := range r.Items[n].Reviews {
+			r.Items[n].Reviews[j].UserID = ""
+		}
+	}
+	return r
 }
 func PublicRequest(r Request) Request {
 	r.Items = append([]RequestItem{}, r.Items...)

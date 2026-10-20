@@ -55,6 +55,7 @@ Nesse caso, não execute o Vite na mesma porta. Nesta máquina, o `.env` local u
 - Prévia privada de PDF/JPG/PNG, histórico de versões, aprovação, correção com motivo por arquivo e conclusão validada no servidor. HEIC permite envio/download; conversão de prévia fica pendente.
 - Recorrências mensais idempotentes no fuso de São Paulo, último dia para meses curtos, snapshots, pausar/reativar e histórico de execução.
 - Lembretes configuráveis, registro de tentativas e falhas de comunicação visíveis no painel; exportação ZIP autorizada.
+- Análise automática opcional de cada arquivo: Docling extrai o texto (PaddleOCR cobre foto e digitalização sem camada de texto) e o modelo Jev julga seis critérios; o veredito é composto em código e pode aprovar, devolver com motivo ou escalar para revisão humana. Desligada por padrão e configurável por escritório.
 - Argon2id, sessões HttpOnly/SameSite/Secure em produção, CSRF, isolamento por escritório, tokens de alta entropia com hash, expiração, auditoria, limites e scanner que falha fechado.
 
 Preço e limite do plano não ficam em componentes. A cobrança do piloto é externa; não existe checkout simulado. A política de retenção pode ser registrada, mas não há rotina de eliminação automática pronta: isso está explicitado na interface e nos gates de lançamento.
@@ -63,7 +64,7 @@ Preço e limite do plano não ficam em componentes. A cobrança do piloto é ext
 
 ```text
 apps/web       React + TypeScript + Vite + EasyUI + Tailwind
-apps/api       Go, API REST, jobs, persistência e migrações
+apps/api       Go, API REST, jobs, análise de documentos, persistência e migrações
 infra          Containers e operação local
 docs           Produto, arquitetura, experiência, aceite e segurança
 scripts        Execução conjunta de desenvolvimento
@@ -96,6 +97,8 @@ go vet ./...
 ```
 
 Os testes Go usam HTTP real de teste, arquivos sintéticos, fixture SMTP e fixture do protocolo ClamAV. Cobrem autenticação, CSRF, segregação, uploads, correção/reenvio, fechamento, limites, concorrência, expiração/revogação, CSV, recorrência e lembretes. Não substituem a homologação com os serviços de produção.
+
+A análise automática tem testes de unidade da composição do veredito, dos clientes HTTP (Docling, PaddleOCR e TypeSafe em servidores de teste) e do worker que aplica ou não o resultado. **Os serviços reais — docling-serve, PaddleOCR e a API da TypeSafe — não foram executados nesta entrega:** não há medição de acurácia, latência, custo por documento nem calibração dos limiares em documentos reais. Antes de ligar o modo automático em um escritório, isso precisa ser feito.
 
 Teste MySQL opt-in, somente contra banco descartável e isolado:
 

@@ -14,7 +14,9 @@ Se a porta 8080 já estiver ocupada, configure `API_HOST_PORT=18080` no `.env`. 
 
 Para executar também o frontend estático em container, use `docker compose --env-file .env --profile web up --build -d` e abra `http://localhost:5173`. Esse perfil compila o React e usa Nginx para o fallback de rotas e proxy `/api`; não inicie o Vite ao mesmo tempo na porta 5173. O proxy usa HTTP/1.1, transmite upload/download sem buffering de disco, desabilita cache da API e preserva cookies de sessão/portal. A landing e rotas do cliente têm `no-store` e política de referência que não expõe tokens. Não inclui TLS de produção. Comportamento de streaming configurado conforme a [documentação oficial do proxy Nginx](https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_request_buffering).
 
-API usa nomes internos `mysql`, `minio`, `mailpit`, `clamav`. `WEB_ORIGIN` deve coincidir com a origem do Vite. Credenciais do MinIO ficam apenas no servidor. O backend aplica as migrações e inicializa o bucket apenas em desenvolvimento. Em produção, o bucket privado deve existir e estar configurado antes de iniciar a API.
+API usa nomes internos `mysql`, `minio`, `mailpit`, `clamav`. `WEB_ORIGIN` deve coincidir com a origem em que o app é aberto. Em desenvolvimento os apelidos de loopback equivalentes (`localhost`, `127.0.0.1`, `[::1]`) e a porta da própria API são aceitos automaticamente, de modo que abrir `http://127.0.0.1:5173` não devolve mais `origin_rejected`. Para qualquer outro endereço — o IP da máquina na rede local, usado para testar no celular, ou a porta publicada da API quando `API_HOST_PORT` difere de 8080 — liste a origem em `WEB_ORIGINS` (separadas por vírgula). Em produção a lista é exata e exige HTTPS em todas as entradas.
+
+`TRUSTED_PROXY_CIDRS` define quais faixas de proxy podem informar o endereço do cliente por `X-Forwarded-For`. O perfil `web` já define as faixas privadas do Compose, porque o Nginx encaminha todo o tráfego e, sem isso, todos os visitantes dividiriam um único limite de requisições por IP. Credenciais do MinIO ficam apenas no servidor. O backend aplica as migrações e inicializa o bucket apenas em desenvolvimento. Em produção, o bucket privado deve existir e estar configurado antes de iniciar a API.
 
 Primeiro build do MinIO compila a fonte fixada e pode levar minutos. ClamAV pode atualizar assinaturas na primeira execução e ainda não aceitar varreduras; a API inicia após o healthcheck `clamdcheck.sh` confirmar o scanner, com seis minutos de tolerância inicial. Uma varredura posterior sem resultado válido continua falhando fechada. A documentação oficial recomenda 3–4 GiB de RAM para o scanner. [ClamAV Docker](https://docs.clamav.net/manual/Installing/Docker.html).
 
@@ -23,6 +25,21 @@ Mailpit captura mensagens localmente: aceitação nessa caixa não prova entrega
 Volumes nomeados preservam banco, objetos, e-mails e assinaturas entre reinícios. `docker compose down` conserva volumes; não usar `down -v` sem aceitar a perda dos dados locais. Arquivos sintéticos devem ficar separados dos ambientes comerciais.
 
 Limites locais configuráveis: `CLIENT_LIMIT=30`, `MAX_UPLOAD_BYTES=20971520` (20 MiB), `MAX_ORG_STORAGE_BYTES=1073741824` (1 GiB) e `MAX_REQUEST_STORAGE_BYTES=524288000` (500 MiB). A quota inclui versões antigas/substituídas, pois elas continuam ocupando armazenamento. São limites técnicos iniciais; a UI deve obter permissões reais do servidor e não fixar o plano nos componentes.
+
+## Perfil `ai`: extração de texto
+
+A análise automática usa dois containers, ambos no perfil `ai` porque baixam modelos de centenas de MiB e não devem subir no dia a dia:
+
+```sh
+docker compose --env-file .env --profile ai up --build -d
+```
+
+- **docling** usa a imagem oficial `quay.io/docling-project/docling-serve`, fixada em `v1.37.0` (índice multi-arquitetura, roda nativo em Apple Silicon), que expõe a mesma pipeline da biblioteca por HTTP em `:5001`. A API chama `POST /v1/convert/file` pedindo Markdown com OCR ligado. Conversão de PDF longo leva dezenas de segundos na primeira execução, enquanto os modelos são baixados para o volume `docling_models`. O Docling já traz OCR próprio, então ele sozinho atende o fluxo. [Docling](https://docling.ai/).
+- **paddleocr** é construído a partir de `infra/paddleocr.Dockerfile`: o projeto não publica imagem de serviço pronta, e o `paddlex --serve --pipeline OCR` é a forma documentada de expor a pipeline em HTTP (`POST /ocr`, porta 8080). Serve de fallback quando o Docling recupera menos de 240 caracteres, que é o caso da foto de documento sem camada de texto. [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR).
+
+As duas portas são publicadas **apenas em `127.0.0.1`** (`5001` para o Docling, `8081` para o PaddleOCR, porque a API em `npm run dev` ocupa a 8080). Isso existe para o modo sem Docker, em que a API Go roda no host e precisa alcançá-las; dentro da rede do Compose elas continuam sendo `docling:5001` e `paddleocr:8080`. Em produção, não publicar nenhuma das duas. O julgamento usa a API da TypeSafe (`TYPESAFE_API_KEY`), que é externa e exige HTTPS — é o único serviço desta arquitetura que recebe conteúdo extraído dos documentos, e isso precisa constar do contrato com o escritório antes de documentos reais. Com `AI_REVIEW_ENABLED=true`, a API recusa iniciar sem chave e sem ao menos um extrator.
+
+**Estado da homologação.** A API da TypeSafe foi chamada com chave real: `POST /v1/systemone` respondeu `200` com `jev-1.13.0` e o formato esperado pelo cliente Go. A imagem do Docling foi baixada e iniciada localmente. O container do PaddleOCR **não foi construído**: as versões fixadas no Dockerfile não foram verificadas contra o índice do PyPI e o build é longo. Acurácia, latência e custo por documento continuam sem medição, e os limiares seguem sem calibração.
 
 ## Por que compilar MinIO
 

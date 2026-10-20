@@ -75,7 +75,9 @@ export function CreateRequest() {
     queryFn: () => api<Template[]>("/templates"),
   });
   const clients = clientsQuery.data || [];
-  const templates = templatesQuery.data || [];
+  // The list now carries archived models so they can be reactivated; only
+  // active ones may start a new request.
+  const templates = (templatesQuery.data || []).filter((t) => t.active);
   const selectedClients = clients.filter((c) => chosen.includes(c.id));
   const create = useMutation({
     mutationFn: () =>

@@ -21,6 +21,11 @@ services:
       APP_ENV: development
       PORT: "8080"
       WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:5173}
+      # Origens extras aceitas pelo navegador (lista separada por vírgula).
+      WEB_ORIGINS: ${WEB_ORIGINS:-}
+      # Faixas privadas do Compose: só assim o X-Forwarded-For do Nginx vale
+      # como endereço do cliente para o limite por IP.
+      TRUSTED_PROXY_CIDRS: ${TRUSTED_PROXY_CIDRS:-10.0.0.0/8,172.16.0.0/12,192.168.0.0/16}
       STORE_DRIVER: mysql
       MYSQL_DSN: "${MYSQL_USER:-docping}:${MYSQL_PASSWORD:?Defina MYSQL_PASSWORD no .env}@tcp(mysql:3306)/${MYSQL_DATABASE:-docping}?parseTime=true&loc=UTC"
       DATA_DIR: /data
@@ -38,6 +43,16 @@ services:
       MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-20971520}
       MAX_ORG_STORAGE_BYTES: ${MAX_ORG_STORAGE_BYTES:-1073741824}
       MAX_REQUEST_STORAGE_BYTES: ${MAX_REQUEST_STORAGE_BYTES:-524288000}
+      # Análise automática. Sem AI_REVIEW_ENABLED=true nada é analisado e todo
+      # documento continua indo para revisão humana.
+      AI_REVIEW_ENABLED: ${AI_REVIEW_ENABLED:-false}
+      DOCLING_URL: http://docling:5001
+      DOCLING_OCR_LANG: ${DOCLING_OCR_LANG:-pt}
+      PADDLEOCR_URL: http://paddleocr:8080
+      TYPESAFE_API_KEY: ${TYPESAFE_API_KEY:-}
+      TYPESAFE_MODEL: ${TYPESAFE_MODEL:-jev-latest}
+      AI_APPROVE_CONFIDENCE: ${AI_APPROVE_CONFIDENCE:-0.70}
+      AI_REJECT_CONFIDENCE: ${AI_REJECT_CONFIDENCE:-0.75}
     ports:
       - "127.0.0.1:${API_HOST_PORT:-8080}:8080"
     volumes:
@@ -51,6 +66,46 @@ services:
         condition: service_started
       clamav:
         condition: service_healthy
+    restart: unless-stopped
+
+  # Extração de texto. Ambos ficam no perfil "ai" porque baixam modelos
+  # pesados: só sobem quando a análise automática é usada.
+  docling:
+    profiles: ["ai"]
+    image: quay.io/docling-project/docling-serve:v1.37.0
+    environment:
+      DOCLING_SERVE_ENABLE_UI: "false"
+      DOCLING_SERVE_MAX_SYNC_WAIT: "600"
+    volumes:
+      - docling_models:/opt/app-root/src/.cache
+    ports:
+      - "127.0.0.1:5001:5001"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:5001/health')"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 5m
+    restart: unless-stopped
+
+  paddleocr:
+    profiles: ["ai"]
+    # OCR de fallback para foto de documento, onde o PDF não tem camada de
+    # texto. Veja infra/README.md para a imagem e o comando de serviço.
+    build:
+      context: ./infra
+      dockerfile: paddleocr.Dockerfile
+    volumes:
+      - paddleocr_models:/root/.paddlex
+    ports:
+      # 8081 no host: a API em `npm run dev` ocupa a 8080.
+      - "127.0.0.1:8081:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null -X POST http://localhost:8080/ocr -H 'Content-Type: application/json' -d '{}' || test $$? -eq 22"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 5m
     restart: unless-stopped
 
   mysql:
@@ -123,6 +178,8 @@ services:
 
 volumes:
   api_data:
+  docling_models:
+  paddleocr_models:
   mysql_data:
   minio_data:
   mailpit_data:

@@ -74,7 +74,7 @@ func (a *App) register(c *call) (any, error) {
 			return nil, fail(409, "email_exists", "Este e-mail já possui uma conta.")
 		}
 	}
-	o := domain.Organization{ID: domain.ID(), Name: strings.TrimSpace(input.OrganizationName), ClientLimit: a.Config.ClientLimit, Plan: "founder_pilot", RetentionDays: 365, ReminderDays: []int{3, 6}, RemindersEnabled: true, CreatedAt: domain.Now()}
+	o := domain.Organization{ID: domain.ID(), Name: strings.TrimSpace(input.OrganizationName), ClientLimit: a.Config.ClientLimit, Plan: "founder_pilot", AIReview: domain.AIReviewSuggest, RetentionDays: 365, ReminderDays: []int{3, 6}, RemindersEnabled: true, CreatedAt: domain.Now()}
 	u := domain.User{ID: domain.ID(), OrgID: o.ID, Name: strings.TrimSpace(input.Name), Email: input.Email, StoredHash: passwordHash(input.Password), CreatedAt: domain.Now()}
 	c.S.Organizations[o.ID] = o
 	c.S.Users[u.ID] = u
@@ -112,7 +112,7 @@ func (a *App) logout(c *call) (any, error) {
 	return nil, nil
 }
 func (a *App) demo(c *call) (any, error) {
-	o := domain.Organization{ID: domain.ID(), Name: "Aurora Contabilidade", Demo: true, ClientLimit: 30, Plan: "demo", RetentionDays: 365, ReminderDays: []int{3, 6}, RemindersEnabled: false, CreatedAt: domain.Now()}
+	o := domain.Organization{ID: domain.ID(), Name: "Aurora Contabilidade", Demo: true, ClientLimit: 30, Plan: "demo", AIReview: domain.AIReviewAuto, RetentionDays: 365, ReminderDays: []int{3, 6}, RemindersEnabled: false, CreatedAt: domain.Now()}
 	u := domain.User{ID: domain.ID(), OrgID: o.ID, Name: "Mariana", Email: "demo-" + o.ID + "@example.invalid", CreatedAt: domain.Now()}
 	c.S.Organizations[o.ID] = o
 	c.S.Users[u.ID] = u
@@ -231,7 +231,10 @@ func (a *App) resetPassword(c *call) (any, error) {
 	if !ok || r.Used || expired(r.ExpiresAt) {
 		return nil, fail(410, "reset_expired", "O link de recuperação expirou.")
 	}
-	u := c.S.Users[r.UserID]
+	u, ok := c.S.Users[r.UserID]
+	if !ok {
+		return nil, fail(410, "reset_expired", "O link de recuperação expirou.")
+	}
 	u.StoredHash = passwordHash(input.Password)
 	c.S.Users[u.ID] = u
 	r.Used = true

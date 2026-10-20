@@ -17,6 +17,12 @@ import (
 	"unicode"
 )
 
+// readableFile is the single rule for "this file may be opened, reviewed or
+// analysed": the scanner cleared it, it is a seeded sample, or development
+// explicitly allowed unscanned uploads.
+func (a *App) readableFile(f domain.DocumentFile) bool {
+	return f.ScanStatus == "clean" || f.Sample || a.Config.Env == "development" && f.ScanStatus == "unscanned_development"
+}
 func safeFilename(v string) string {
 	v = strings.ReplaceAll(v, "\\", "/")
 	v = filepath.Base(v)
@@ -35,6 +41,12 @@ func safeFilename(v string) string {
 	}
 	return v
 }
+
+// heifBrands lists the ISO-BMFF brands an iPhone writes for a still photo or a
+// photo burst. Only accepting "heic" rejected pictures taken by recent iOS
+// versions, which stamp "mif1" or "msf1" as the major brand.
+var heifBrands = map[string]bool{"heic": true, "heix": true, "heim": true, "heis": true, "hevc": true, "hevx": true, "hevm": true, "hevs": true, "mif1": true, "msf1": true}
+
 func detectFile(name string, data []byte) (string, error) {
 	kind := http.DetectContentType(data)
 	ext := strings.ToLower(filepath.Ext(name))
@@ -47,12 +59,9 @@ func detectFile(name string, data []byte) (string, error) {
 	case "image/png":
 		valid = ext == ".png"
 	}
-	if len(data) >= 12 && string(data[4:8]) == "ftyp" {
-		brand := string(data[8:12])
-		if brand == "heic" || brand == "heix" || brand == "hevc" || brand == "hevx" {
-			kind = "image/heic"
-			valid = ext == ".heic"
-		}
+	if len(data) >= 12 && string(data[4:8]) == "ftyp" && heifBrands[string(data[8:12])] {
+		kind = "image/heic"
+		valid = ext == ".heic"
 	}
 	if !valid {
 		return "", invalid("Envie um PDF, JPG, PNG ou HEIC com extensão e conteúdo válidos.")
@@ -132,6 +141,9 @@ func (a *App) uploadHTTP(w http.ResponseWriter, r *http.Request) {
 	sum := sha256.Sum256(data)
 	prepared := domain.DocumentFile{ID: domain.ID(), Name: name, MIMEType: kind, Size: int64(len(data)), CreatedAt: domain.Now(), ScanStatus: scan, SHA256: hex.EncodeToString(sum[:])}
 	prepared.ObjectKey = initial.OrgID + "/" + initial.ID + "/" + prepared.ID
+	if a.Config.AIReview {
+		prepared.Analysis = &domain.Analysis{Status: "queued", RequestedAt: domain.Now()}
+	}
 	if err = a.Objects.Put(ctx, prepared.ObjectKey, kind, data); err != nil {
 		writeError(w, fail(503, "storage_unavailable", "Não foi possível salvar o arquivo. Tente novamente."))
 		return
@@ -152,6 +164,9 @@ func (a *App) uploadHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, err)
 		return
+	}
+	if consumed {
+		a.enqueueAnalysis(analysisJob{OrgID: initial.OrgID, RequestID: initial.ID, ItemID: r.PathValue("itemID"), FileID: prepared.ID})
 	}
 	writeJSON(w, 200, result)
 }
@@ -184,7 +199,7 @@ func (a *App) commitUpload(c *call, prepared domain.DocumentFile, consumed *bool
 		if !f.Superseded {
 			active++
 			if f.SHA256 == digest && item.Status != "correction_required" {
-				return domain.PublicRequest(r), nil
+				return domain.PortalRequest(r), nil
 			}
 		}
 	}
@@ -244,7 +259,7 @@ func (a *App) commitUpload(c *call, prepared domain.DocumentFile, consumed *bool
 	domain.Recalculate(&r)
 	c.S.Requests[r.ID] = r
 	c.S.Audit(r.OrgID, "", "document.uploaded", f.ID)
-	return domain.PublicRequest(r), nil
+	return domain.PortalRequest(r), nil
 }
 func (a *App) authorizedFile(ctx context.Context, r *http.Request) (domain.DocumentFile, error) {
 	var found domain.DocumentFile
@@ -271,7 +286,7 @@ func (a *App) authorizedFile(ctx context.Context, r *http.Request) (domain.Docum
 			for _, item := range req.Items {
 				for _, f := range item.Files {
 					if f.ID == r.PathValue("id") {
-						if f.ScanStatus != "clean" && !f.Sample && !(a.Config.Env == "development" && f.ScanStatus == "unscanned_development") {
+						if !a.readableFile(f) {
 							return fail(423, "file_quarantined", "Arquivo indisponível para download.")
 						}
 						found = f
@@ -341,7 +356,7 @@ func (a *App) export(w http.ResponseWriter, r *http.Request) {
 	}()
 	for _, item := range req.Items {
 		for _, f := range item.Files {
-			if f.Superseded || !(f.ScanStatus == "clean" || f.Sample || a.Config.Env == "development" && f.ScanStatus == "unscanned_development") {
+			if f.Superseded || !a.readableFile(f) {
 				continue
 			}
 			var reader io.ReadCloser

@@ -7,6 +7,38 @@ export type RequestStatus =
   | "correction_required"
   | "completed"
   | "cancelled";
+export type AIReviewMode = "off" | "suggest" | "auto";
+export type AnalysisStatus =
+  | "queued"
+  | "running"
+  | "completed"
+  | "failed"
+  | "disabled";
+export type AnalysisVerdict = "approved" | "review" | "rejected";
+export interface AnalysisSignal {
+  key: string;
+  label: string;
+  kind: "noul" | "score" | "choice";
+  answer?: string;
+  value: number;
+  confidence: number;
+}
+/** Automated conformity check of one file: Docling/PaddleOCR extract the text,
+ *  Jev judges it, and the server composes the verdict. */
+export interface Analysis {
+  status: AnalysisStatus;
+  verdict?: AnalysisVerdict;
+  confidence: number;
+  reason?: string;
+  signals?: AnalysisSignal[];
+  extractor?: string;
+  model?: string;
+  characters?: number;
+  applied: boolean;
+  error?: string;
+  requestedAt?: string;
+  completedAt?: string;
+}
 export interface Organization {
   id: string;
   name: string;
@@ -17,6 +49,7 @@ export interface Organization {
   remindersEnabled?: boolean;
   reminderDays?: number[];
   retentionDays?: number;
+  aiReview?: AIReviewMode;
 }
 export interface Session {
   environment?: string;
@@ -46,6 +79,7 @@ export interface Template {
   name: string;
   description: string;
   items: TemplateItem[];
+  active: boolean;
 }
 export interface DocumentFile {
   id: string;
@@ -56,6 +90,7 @@ export interface DocumentFile {
   scanStatus: string;
   superseded?: boolean;
   sample?: boolean;
+  analysis?: Analysis;
 }
 export interface RequestItem extends TemplateItem {
   status: ItemStatus;
@@ -65,6 +100,7 @@ export interface RequestItem extends TemplateItem {
   reviews?: {
     action: string;
     reason?: string;
+    source?: string;
     userId: string;
     createdAt: string;
   }[];

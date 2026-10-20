@@ -5,15 +5,24 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { CheckCircle2, AlertCircle, X } from "lucide-react";
-type Toast = (message: string, tone?: "success" | "error") => void;
+import { AlertCircle, AlertTriangle, CheckCircle2, Info, X } from "lucide-react";
+type Tone = "success" | "error" | "warning" | "info";
+type Toast = (message: string, tone?: Tone) => void;
+// Each tone pairs a colour with its own icon, so the meaning survives for
+// anyone who cannot tell the colours apart.
+const icons = {
+  success: CheckCircle2,
+  error: AlertCircle,
+  warning: AlertTriangle,
+  info: Info,
+};
 const ToastContext = createContext<Toast>(() => {});
 export function useToast() {
   return useContext(ToastContext);
 }
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [messages, setMessages] = useState<
-    { id: number; text: string; tone: string }[]
+    { id: number; text: string; tone: Tone }[]
   >([]);
   const toast = useCallback<Toast>((text, tone = "success") => {
     const id = Date.now() + Math.random();
@@ -33,11 +42,10 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             className={`toast ${m.tone}`}
             role={m.tone === "error" ? "alert" : "status"}
           >
-            {m.tone === "error" ? (
-              <AlertCircle size={18} />
-            ) : (
-              <CheckCircle2 size={18} />
-            )}
+            {(() => {
+              const Icon = icons[m.tone as Tone] ?? CheckCircle2;
+              return <Icon size={18} />;
+            })()}
             <span>{m.text}</span>
             <button
               aria-label="Dispensar mensagem"

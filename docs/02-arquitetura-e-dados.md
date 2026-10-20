@@ -91,3 +91,19 @@ Quarentena é estado do **arquivo**, separado do item: recebido, em verificaçã
 | cancelled | Cancelada | Não aceita uploads nem novos lembretes |
 
 `Atrasada` é um filtro derivado de prazo vencido e estado ativo, não um segundo estado persistido. Concluída/cancelada não recebe upload; reabrir exige autorização explícita e auditoria. Toda transição deve ser validada pela API, mesmo se a interface ocultar a ação.
+
+## Análise automática de documentos (Docling + PaddleOCR + Jev)
+
+Decisão: manter o monólito. A análise não introduz microserviço, Redis nem fila externa. A fila é um canal em memória do próprio binário, com dois workers, e os serviços de extração são containers no mesmo Compose, sob o perfil `ai`, porque baixam modelos pesados.
+
+O recurso é desligado por padrão (`AI_REVIEW_ENABLED`). Sem ele nada muda: todo upload continua indo para revisão humana.
+
+**Fronteira transacional.** A análise respeita a regra que já vale para SMTP e storage: nenhum I/O externo dentro da transação. O upload confirma o arquivo e grava `analysis.status=queued` no mesmo commit; o enfileiramento ocorre depois. O worker lê o estado, baixa o objeto, chama Docling/PaddleOCR e Jev fora de qualquer transação, e só então abre uma transação de escrita para gravar o veredito. O e-mail de correção, quando o veredito é aplicado, é efeito pós-commit.
+
+**Quem decide.** O modelo responde seis julgamentos tipados e independentes sobre o mesmo estado, numa única chamada. A composição do veredito é código (`internal/analysis/review.go`), com limiares em configuração. Isso mantém a política auditável, permite mudar limiar sem nova inferência, e garante que resposta faltante, serviço indisponível ou probabilidade próxima de 0,5 caiam sempre em revisão humana — nunca em aprovação.
+
+**Reentrância.** O worker pode terminar minutos depois do upload. Tudo é revalidado na transação de escrita: solicitação encerrada, item já revisado por uma pessoa, arquivo substituído. Uma decisão humana sempre prevalece; o veredito tardio fica apenas registrado com `applied:false`.
+
+**Privacidade.** `domain.PortalRequest` remove a análise e o `userId` das revisões antes de qualquer resposta ao cliente. O cliente lê o motivo da correção; nunca os sinais, as notas ou quem decidiu. O texto extraído não é persistido — apenas a contagem de caracteres, o veredito e os sinais.
+
+**Desvio conhecido.** Os limiares padrão são ponto de partida e precisam ser calibrados nos documentos do próprio escritório antes de confiar no modo automático. A fila é volátil: um reinício perde jobs enfileirados e o item permanece `uploaded`, visível para revisão. O julgamento é sobre o texto extraído, não sobre a imagem: assinatura, carimbo e adulteração visual não são verificados.
