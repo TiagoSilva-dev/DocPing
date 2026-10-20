@@ -1,0 +1,17 @@
+{
+  "name": "docping",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/web"
+  ],
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "dev:web": "npm run dev --workspace @docping/web",
+    "dev:api": "cd apps/api && STORE_DRIVER=json APP_ENV=development ALLOW_UNSCANNED_UPLOADS=true go run ./cmd/server",
+    "build": "npm run build --workspace @docping/web",
+    "check": "npm run check --workspace @docping/web",
+    "test": "npm run test --workspace @docping/web",
+    "test:e2e": "npm run test:e2e --workspace @docping/web --"
+  }
+}

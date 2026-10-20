@@ -1,0 +1,99 @@
+# Contrato implementado da API DocPing
+
+Base `/api`; JSON `camelCase`; IDs são strings opacas; instantes RFC3339 UTC; competência `AAAA-MM`; datas civis `AAAA-MM-DD` no fuso America/Sao_Paulo. Listagens retornam arrays completos nesta primeira versão. Não existe paginação de servidor ainda. Erros usam `{ "error": { "code": "validation_error", "message": "Mensagem em português." } }`. Validação 422, autenticação 401, acesso de outro escritório 404, CSRF/origem 403, conflito de estado 409, link expirado/revogado 410, excesso de arquivo 413, limite de tentativas 429, scanner/storage indisponível 503. Mutações bem sucedidas retornam 200 (inclusive criação); resposta sem corpo de domínio usa `{ "ok": true }`.
+
+## Sessão e autenticação
+
+Sessão autenticada usa cookie `docping_session`, HttpOnly, SameSite=Lax, Secure em produção, validade de 24h; o servidor guarda somente SHA-256 do token. Mutações autenticadas exigem `X-CSRF-Token` obtido na sessão. API valida `Origin` contra `WEB_ORIGIN` e rejeita `Sec-Fetch-Site: cross-site`. Para desenvolvimento use o proxy `/api` do Vite; o cliente HTTP inclui `credentials: 'include'`. Rate limiting por IP usa o endereço da conexão, sem confiar em X-Forwarded-For; um proxy de produção precisa de política própria de rate limit.
+
+`GET /session`, `POST /auth/register`, `POST /auth/login` e `POST /auth/demo` retornam:
+
+```json
+{
+  "environment": "development",
+  "user": { "id": "...", "name": "Mariana", "email": "mariana@example.com" },
+  "organization": {
+    "id": "...", "name": "Aurora Contabilidade", "demo": false,
+    "clientLimit": 30, "plan": "founder_pilot", "email": "",
+    "retentionDays": 365, "reminderDays": [3, 6], "remindersEnabled": true,
+    "createdAt": "2026-10-20T02:00:00Z"
+  },
+  "csrfToken": "..."
+}
+```
+
+- `POST /auth/register`: `{organizationName,name,email,password}`. Senha de 12 a 128 caracteres, Argon2id (64MiB,3 iterações,1 thread), e-mail único. Cria escritório vazio com três modelos iniciais; não cria clientes/documentos de demonstração.
+- `POST /auth/login`: `{email,password}`. Mensagem genérica para credenciais inválidas.
+- `POST /auth/demo`: cria um escritório de demonstração isolado, sem credenciais compartilhadas. Os documentos são PDFs sintéticos gerados sob autorização no endpoint de arquivo, marcados `sample:true`; e-mails externos ficam desativados. Não há sessão demo implícita. A sessão e o portal incluem `environment` (`development` ou `production`) para identificar claramente espaços locais antes do primeiro upload.
+- `POST /auth/logout`: exige sessão+CSRF, revoga a sessão e limpa o cookie.
+- `POST /auth/forgot-password`: `{email}`; resposta genérica `{message}`. O link é persistido antes da tentativa SMTP, e invalidado em caso de falha; expira em 30min. Link frontend `/redefinir-senha?token=...`.
+- `POST /auth/reset-password`: `{token,password}`; invalida todas as sessões do usuário. O frontend de recuperação pode não estar exposto nesta entrega; endpoints são reais.
+
+## Clientes
+
+`Client` = `{id,organizationId,name,cnpj,contactName,email,phone,active,createdAt}`. Nome obrigatório de até 180 caracteres; responsável até120; telefone até30; e-mail opcional válido. CNPJ opcional armazenado em string, normalizado sem pontuação, suporta 12 caracteres alfanuméricos e dois verificadores numéricos. Não aplica checksum nesta entrega. CNPJ único por escritório; limite do plano conta clientes ativos. Não há exclusão física.
+
+- `GET /clients`: `Client[]`, inclui arquivados.
+- `GET /clients/{id}`: `Client`.
+- `POST /clients`: `{name,cnpj?,contactName?,email?,phone?}` → `Client` ativo.
+- `PUT /clients/{id}`: objeto com os campos editáveis e `active`. Mantém ID/escritório/criação. Arquivar usa `active:false`.
+- `POST /clients/import`: `{csv:string,commit:boolean}` → `{clients:Client[],errors:[{row:number,message:string}],imported:number}`. Cabeçalhos `name,cnpj,contactName,email,phone` ou `nome,cnpj,responsavel,email,telefone`; vírgula ou ponto e vírgula. Limite1000 linhas/JSON1MiB. `commit:false` valida/prévia; `commit:true` grava atomicamente apenas se não houver erros. Linha0 representa limite global. As IDs só são atribuídas na gravação.
+
+## Modelos
+
+`Template` = `{id,organizationId,name,description,active,createdAt,items:TemplateItem[]}`. `TemplateItem` = `{id,name,instruction,required,maxFiles}`. De1 a30 itens, ao menos um obrigatório, maxFiles de1 a20, nome até180, instrução até1000. Itens têm ordem de array. Cada solicitação recebe cópia independente desses requisitos.
+
+- `GET /templates` → `Template[]` ativos.
+- `GET /templates/{id}` → `Template`.
+- `POST /templates`: `{name,description,items}` → `Template`.
+- `PUT /templates/{id}`: `{name?,description?,items?,active?}` → `Template`; edição nunca altera solicitações anteriores. Arquivar usa `active:false`.
+
+## Solicitações e revisão
+
+`Request` = `{id,organizationId,clientId,clientName,templateId,title,competence,dueDate,status,items,createdAt,updatedAt,recurring,scheduleId?,sensitive}`.
+
+`RequestItem` = campos de TemplateItem + `{status,correctionReason?,correctionFileId?,files:DocumentFile[],reviews:Review[]}`.
+
+`DocumentFile` = `{id,name,mimeType,size,createdAt,scanStatus,superseded,sample?}`. Chaves de storage e hashes do conteúdo nunca saem da API. `scanStatus` é `clean`, `sample` (sintético) ou `unscanned_development` (somente bypass explícito no desenvolvimento). Histórico de arquivos substituídos permanece e usa `superseded:true`.
+
+`Review` = `{action:'approve'|'correct',reason?,userId,createdAt}`. Estados de item: `pending,uploaded,approved,correction_required`. Estado de solicitação é derivado, com prioridade correção/revisão, e inclui `pending,in_progress,under_review,correction_required,completed,cancelled`. `under_review` significa que existe documento para analisar, mesmo que outros estejam pendentes. Obrigatórios aprovados concluem somente se nenhum item enviado aguarda revisão/correção; opcionais sem envio não impedem conclusão. Encerradas não aceitam uploads.
+
+- `GET /requests` → `Request[]` ordenadas por atividade desc; frontend filtra localmente.
+- `POST /requests`: `{clientIds:string[],templateId,title,competence,dueDate,items?:TemplateItem[],recurring?:boolean,sensitive?:boolean}` → `Request[]`. Lote atômico, clientes ativos do escritório. `items` substitui a cópia do modelo para este lote. `recurring:true` também cria agenda mensal, mesmo dia local de hoje, vencimento baseado no prazo informado. A agenda preserva o snapshot dos itens usados, inclusive customizações pontuais, e a classificação sensível. Alterar o modelo não muda uma agenda já configurada; selecionar outro modelo na agenda cria um novo snapshot. `sensitive:true` exige cliente com e-mail e confirmação por código no portal.
+- `GET /requests/{id}` → `Request`.
+- `POST /requests/{id}/share` → `{url,token,expiresAt}`. URL frontend `/p/{token}`. Token aleatório256bits, apenas hash em banco; validade30dias. Cada compartilhamento cria token novo sem revogar anteriores.
+- `POST /requests/{id}/revoke`: revoga todos os links existentes; novo compartilhamento emite outro.
+- `POST /requests/{id}/cancel`: cancela, revoga links, preserva arquivos/histórico. Concluída não pode ser cancelada.
+- `POST /requests/{requestID}/items/{itemID}/review`: `{action:'approve'|'correct',reason?,fileId?}` → `Request`. Só item `uploaded` pode ser revisado; motivo obrigatório para correção, até1000. Com vários arquivos ativos, `fileId` deve identificar o arquivo afetado; com apenas um ele é selecionado automaticamente. Somente esse arquivo é substituído no reenvio; os demais permanecem ativos. Correção gera tentativa real de e-mail, resultado visível em notificações.
+- `POST /requests/{id}/notify`: `{channel:'email'|'whatsapp_opened'}` → `Delivery`. Só aceita solicitação aberta; limita repetição a1min. `accepted` significa aceitação SMTP, não entrega/leitura. `failed` inclui motivo sanitizado. WhatsApp manual registra exclusivamente `opened`.
+- `GET /requests/{id}/export`: ZIP autorizado dos arquivos atuais liberados; nomes saneados; mantém documentos privados. Sem arquivos retorna422.
+
+## Portal e arquivos privados
+
+- `GET /portal/{token}` → `{environment:string,request:Request,organization:{name,demo},client:{name},maxUploadBytes:number}`. Link inválido, expirado, revogado ou solicitação cancelada retorna410.
+- `POST /portal/{token}/items/{itemID}/upload`: multipart campo `file` → `Request` atualizado. Limite padrão20MiB; valida extensão e assinatura PDF/JPEG/PNG/HEIC, nome saneado, SHA-256 para retry idempotente, limite por item. Leitura da conexão móvel, ClamAV síncrono e storage ocorrem fora da transação de banco. O commit revalida token, cookie sensível, estados e quotas; objetos sem metadados confirmados são removidos. Os bytes ficam privados antes de serem disponibilizados. Scanner indisponível/inconclusivo falha fechado; malware retorna422. Upload de correção marca somente o arquivo indicado pelo escritório como substituído; preserva os demais arquivos ativos e o histórico. HEIC é recebido/download; conversão para prévia não implementada.
+- `GET /files/{fileID}`: arquivo com sessão do mesmo escritório **ou** `?token={portalToken}` pertencente exatamente à solicitação. Arquivo nunca é público no storage. PDF/JPEG/PNG inline; HEIC attachment. Range requests não são implementadas nesta primeira versão.
+- `POST /portal/{token}/code`: solicita código no e-mail do cliente; válido10min, no máximo cinco tentativas, reenvio após10min. Só para solicitações sensíveis. Escritórios de demonstração não emitem códigos/e-mails externos.
+- `POST /portal/{token}/verify`: `{code}` → `{verified:boolean,message?}`. Confirmação vale1h para este navegador em cookie HttpOnly separado por link; apenas o hash da credencial é persistido. Outro navegador com o mesmo link continua exigindo código; tentativa inválida retorna200 com `verified:false` para persistir contador. GET/upload/download sensível retornam403 `identity_required` até confirmar. O frontend desta entrega pode não expor essa opção avançada.
+
+## Recorrência, notificações e escritório
+
+`Schedule` = `{id,organizationId,name,templateId,clientIds,dayOfMonth,dueDays,active,lastRun?,nextRun?,createdAt,sensitive,items?}`.
+
+- `GET /schedules` → `Schedule[]`.
+- `POST /schedules`: `{name,templateId,clientIds,dayOfMonth,dueDays,active}` → `Schedule`.
+- `PUT /schedules/{id}`: mesmos campos parciais → `Schedule`; pausar funciona mesmo se cliente/modelo foi arquivado.
+- `GET /schedules/{id}/runs` → `ScheduleRun[]`, `{id,organizationId,scheduleId,clientId,competence,requestId,createdAt}`.
+- Worker no monólito roda no início e a cada minuto. Competência é o mês anterior à execução; dia inexistente vira último dia. Restrição MySQL e trava de escrita impedem duplicação agenda/cliente/competência. Agendas novas começam na próxima execução futura; não há retroatividade de meses perdidos. Primeira mensagem usa SMTP e WhatsApp permanece manual. Em falha SMTP, tentativa é registrada e não há repetição automática silenciosa; usuário pode tentar manualmente. Worker bloqueia instâncias concorrentes via advisory lock MySQL.
+- Lembretes seguem `reminderDays` relativos à criação, não são enviados após conclusão/cancelamento e usam chave lógica por solicitação/regra. Em retomada após inatividade somente o lembrete mais recente devido é tentado, evitando uma rajada de mensagens antigas.
+- `GET /notifications` → `Delivery[]`: `{id,organizationId,requestId,channel,kind,status,error?,createdAt}`. Tentativas SMTP são persistidas como `pending` antes da chamada externa e o resultado é gravado após aceitação/falha. SMTP não mantém trava de banco; tentativas interrompidas por mais de5min viram `failed`, sem reenvio cego. Uma solicitação encerrada antes do despacho não é enviada.
+- `GET /audit` → eventos `{id,organizationId,userId?,action,entityId,createdAt}`; sem conteúdo documental/tokens/credenciais.
+- `GET /organization` → Organization.
+- `PUT /organization`: `{name,email,remindersEnabled,reminderDays,retentionDays}`. Dias únicos1..60, até5; retenção30..3650. `plan/clientLimit/demo` são controlados pelo servidor. Retenção é política registrada; eliminação automática e fluxo de direitos dos titulares ainda exigem implementação operacional antes de dados reais.
+- `GET /health` → `{status:'ok'}` significa processo atendendo, sem alegar integridade de integrações externas.
+
+## Persistência e limites desta entrega
+
+MySQL8 é o padrão, sem fallback. Migração `apps/api/migrations/001_initial.sql` cria tabelas relacionais de organizações, usuários, membros, clientes, modelos/itens, solicitações/itens/arquivos, tokens, agendas/execuções, notificações e auditoria. Ownership, índices de busca e unicidade de recorrência são colunas/constraints relacionais; snapshots JSON guardam agregados para evolução de campos. A versão inicial lê os agregados em cada transação e faz upserts sob trava; isso tem custo crescente e precisa de queries SQL por escritório antes de escala. DDL é idempotente e registrado em schema_migrations; a próxima evolução deve adicionar nova migração.
+
+Desenvolvimento sem Docker é opção explícita `APP_ENV=development STORE_DRIVER=json`; gravação atômica+fsync de arquivo0600. Storage local privado só existe em development. `ALLOW_UNSCANNED_UPLOADS=true` só funciona em development e fica visível nos metadados; nunca marca arquivo como limpo. Produção recusa configuração sem HTTPS frontend, MySQL, S3 HTTPS, scanner e SMTP TLS. Quotas configuráveis de storage são1GiB por escritório e500MiB por solicitação por padrão, incluindo histórico. Backup/restauração do MySQL+objetos, configuração operacional de chaves/SSE do provedor, política de eliminação, scanner em infraestrutura e entrega SMTP real ainda precisam ser homologados. MySQL em produção exige `tls=true` com certificado verificado. Cada PUT S3 em produção solicita SSE-S3 (`AES256`), verifica a confirmação em HEAD e remove/falha antes de publicar metadados se o provedor não confirmar. Desenvolvimento MinIO não exige SSE; criptografia dos discos MySQL/backups e gestão das chaves ainda são responsabilidades operacionais não homologadas. Não declarar prontidão de produção/LGPD.

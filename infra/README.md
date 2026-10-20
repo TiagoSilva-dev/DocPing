@@ -1,0 +1,63 @@
+# Infraestrutura local
+
+O Compose executa Go, MySQL 8, storage S3 local, caixa SMTP de teste e scanner. O frontend roda com Vite no host. Este ambiente é de desenvolvimento; todos os serviços publicados estão ligados a `127.0.0.1`.
+
+## Subir com Docker
+
+1. Se ainda não existe `.env`, copie `.env.example` para ele na raiz (`cp -n .env.example .env`) e troque os valores `change-me`. Preserve o `.env` já configurado desta sessão; mudar o arquivo não altera senhas de um volume MySQL existente. Os valores do exemplo não são credenciais de produção.
+2. Valide a configuração: `docker compose --env-file .env config --quiet`.
+3. Execute `docker compose --env-file .env up --build -d`.
+4. Inicie o frontend seguindo o README da raiz.
+5. Abra o produto em `http://localhost:5173`; API em `http://localhost:8080` por padrão; Mailpit em `http://localhost:8025`; console do storage em `http://localhost:9001`.
+
+Se a porta 8080 já estiver ocupada, configure `API_HOST_PORT=18080` no `.env`. Isso altera somente a publicação no host; Nginx e outros containers continuam usando `api:8080`. A integração desta entrega usou `http://localhost:18080` para evitar conflito com outro processo.
+
+Para executar também o frontend estático em container, use `docker compose --env-file .env --profile web up --build -d` e abra `http://localhost:5173`. Esse perfil compila o React e usa Nginx para o fallback de rotas e proxy `/api`; não inicie o Vite ao mesmo tempo na porta 5173. O proxy usa HTTP/1.1, transmite upload/download sem buffering de disco, desabilita cache da API e preserva cookies de sessão/portal. A landing e rotas do cliente têm `no-store` e política de referência que não expõe tokens. Não inclui TLS de produção. Comportamento de streaming configurado conforme a [documentação oficial do proxy Nginx](https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_request_buffering).
+
+API usa nomes internos `mysql`, `minio`, `mailpit`, `clamav`. `WEB_ORIGIN` deve coincidir com a origem do Vite. Credenciais do MinIO ficam apenas no servidor. O backend aplica as migrações e inicializa o bucket apenas em desenvolvimento. Em produção, o bucket privado deve existir e estar configurado antes de iniciar a API.
+
+Primeiro build do MinIO compila a fonte fixada e pode levar minutos. ClamAV pode atualizar assinaturas na primeira execução e ainda não aceitar varreduras; a API inicia após o healthcheck `clamdcheck.sh` confirmar o scanner, com seis minutos de tolerância inicial. Uma varredura posterior sem resultado válido continua falhando fechada. A documentação oficial recomenda 3–4 GiB de RAM para o scanner. [ClamAV Docker](https://docs.clamav.net/manual/Installing/Docker.html).
+
+Mailpit captura mensagens localmente: aceitação nessa caixa não prova entrega para um e-mail real. Não configurar encaminhamento externo para testes. A porta do scanner não é publicada, para evitar um daemon de leitura/varredura exposto no host.
+
+Volumes nomeados preservam banco, objetos, e-mails e assinaturas entre reinícios. `docker compose down` conserva volumes; não usar `down -v` sem aceitar a perda dos dados locais. Arquivos sintéticos devem ficar separados dos ambientes comerciais.
+
+Limites locais configuráveis: `CLIENT_LIMIT=30`, `MAX_UPLOAD_BYTES=20971520` (20 MiB), `MAX_ORG_STORAGE_BYTES=1073741824` (1 GiB) e `MAX_REQUEST_STORAGE_BYTES=524288000` (500 MiB). A quota inclui versões antigas/substituídas, pois elas continuam ocupando armazenamento. São limites técnicos iniciais; a UI deve obter permissões reais do servidor e não fixar o plano nos componentes.
+
+## Por que compilar MinIO
+
+A release oficial Community `RELEASE.2025-10-15T17-29-55Z` corrige um problema de segurança e orienta compilar containers da fonte. O repositório encontra-se arquivado em abril de 2026. `infra/minio.Dockerfile` fixa essa release em vez de depender de uma imagem antiga sem essa correção. Isso é um recurso **local**, não garantia de manutenção futura. Para piloto, escolher storage compatível com S3 mantido, privado e criptografado. [Release oficial, consulta em 19/10/2026](https://github.com/minio/minio/releases/tag/RELEASE.2025-10-15T17-29-55Z).
+
+MySQL `8.0` acompanha correções de sua linha. ClamAV usa a imagem **oficial Debian `1.4.6-debian`**, com índice multi-arquitetura fixado em `sha256:c7df83a4c9794aeb43b7cff296fc9f42a0f47cbf0e96704510e7e5b57b2f4913`, verificado diretamente no registry; inclui Linux AMD64, ARM64 e PPC64LE. A variante Alpine `1.4_base` não ofereceu ARM64 no teste e foi substituída, permitindo execução nativa em Apple Silicon. Atualizar tag+digest exige nova homologação de scanner e assinaturas. [Fontes oficiais das imagens ClamAV](https://github.com/Cisco-Talos/clamav-docker).
+
+Mailpit está fixado em `v1.31.6`, conferido na [release oficial](https://github.com/axllent/mailpit/releases/tag/v1.31.6). Build, subida e integração do conjunto local foram executados nesta entrega, conforme o registro abaixo; homologação de produção continua separada.
+
+## Desenvolvimento sem Docker
+
+O modo alternativo é uma escolha explícita: API Go com `APP_ENV=development`, `STORE_DRIVER=json`, diretório de dados local privado e arquivos sintéticos. Não é um fallback silencioso quando MySQL falha.
+
+No diretório `apps/api`, após instalar Go e dependências:
+
+```sh
+APP_ENV=development STORE_DRIVER=json DATA_DIR=../../.local-data \
+  WEB_ORIGIN=http://localhost:5173 ALLOW_UNSCANNED_UPLOADS=true \
+  go run ./cmd/server
+```
+
+`ALLOW_UNSCANNED_UPLOADS=true` permite somente experimentar o fluxo com arquivos sintéticos e marca a ausência de varredura. Deixar SMTP/S3/ClamAV sem configuração não significa que estejam funcionando. O envio de e-mail deve falhar explicitamente sem servidor; nunca indicar aceitação sem SMTP.
+
+JSON/local não valida SQL, transações, concorrência, bucket S3, scanner ou e-mail. A integração local com MySQL+storage+scanner+SMTP foi executada separadamente. Antes de piloto real, repetir a homologação no ambiente escolhido, testar restauração e fechar os gates de `docs/05-seguranca-e-piloto.md`.
+
+## Configuração de produção
+
+Separar secrets do repositório, `APP_ENV=production`, `STORE_DRIVER=mysql`, DSN com TLS, origem HTTPS, bucket privado com criptografia, credencial de mínimo privilégio, scanner atualizado e provedor SMTP autenticado com transporte seguro. O modo JSON, storage local e aceite de arquivo não verificado devem ser recusados na inicialização de produção. TLS/CSRF, backups, retenção, alertas e teste de recuperação são requisitos adicionais; este Compose não os fornece.
+
+Não publicar portas de MySQL, console S3, Mailpit ou ClamAV. Um proxy HTTPS pode servir aplicação e API na mesma origem; sem microserviços nem fila adicional. Monólito e jobs devem continuar idempotentes ao reiniciar.
+
+## Validação desta sessão
+
+Em 19–20/10/2026, Compose validou com e sem o perfil `web`; o daemon Docker foi iniciado e o conjunto foi compilado e subiu saudável. O frontend Nginx respondeu HTTP 200 em `http://localhost:5173` e o proxy `/api/health` também respondeu 200.
+
+`node scripts/integration-smoke.mjs --mysql --eicar` passou **18 verificações** contra API Go, MySQL 8, MinIO, ClamAV e Mailpit reais. Incluiu cadastro/sessão, cliente/modelo/solicitação persistidos, CSRF, isolamento entre escritórios, PDF/PNG passando pelo scanner e storage, rejeição da assinatura inofensiva EICAR embutida em PDF sem persistência, bloqueio de acesso anônimo, e-mail aceito e presente no Mailpit, correção sem descartar outro arquivo, aprovação/conclusão, ZIP, código sensível por navegador, revogação e `TestMySQLRoundTrip` real sem skip. Relatório: `test-results/integration-smoke.json`.
+
+Esse teste usa arquivos sintéticos e SMTP local. Não comprova TLS/SSE do ambiente comercial, entrega externa de e-mail, restauração de backup ou experiência visual/mobile. A checagem de configuração SSE de produção usa mock em três casos e precisa de homologação em storage real com criptografia. Fluxos de navegador permanecem sem validação: a tentativa Playwright falhou ao iniciar Chromium (`EPERM`), antes de abrir telas; a ferramenta de navegação também bloqueou o endereço após autorização. Consulte os resultados finais em `docs/06-validacao-da-entrega.md`.

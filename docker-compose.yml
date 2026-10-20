@@ -1,0 +1,129 @@
+name: docping
+
+# Desenvolvimento local. Para produção, use TLS, secrets e serviços mantidos.
+services:
+  web:
+    profiles: ["web"]
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    ports:
+      - "127.0.0.1:5173:8080"
+    depends_on:
+      api:
+        condition: service_started
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ./apps/api
+    environment:
+      APP_ENV: development
+      PORT: "8080"
+      WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:5173}
+      STORE_DRIVER: mysql
+      MYSQL_DSN: "${MYSQL_USER:-docping}:${MYSQL_PASSWORD:?Defina MYSQL_PASSWORD no .env}@tcp(mysql:3306)/${MYSQL_DATABASE:-docping}?parseTime=true&loc=UTC"
+      DATA_DIR: /data
+      S3_ENDPOINT: http://minio:9000
+      S3_BUCKET: ${S3_BUCKET:-docping}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:?Defina S3_ACCESS_KEY no .env}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:?Defina S3_SECRET_KEY no .env}
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+      SMTP_FROM: ${SMTP_FROM:-docping@localhost}
+      SMTP_REQUIRE_TLS: "false"
+      CLAMAV_ADDRESS: clamav:3310
+      ALLOW_UNSCANNED_UPLOADS: "false"
+      CLIENT_LIMIT: ${CLIENT_LIMIT:-30}
+      MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-20971520}
+      MAX_ORG_STORAGE_BYTES: ${MAX_ORG_STORAGE_BYTES:-1073741824}
+      MAX_REQUEST_STORAGE_BYTES: ${MAX_REQUEST_STORAGE_BYTES:-524288000}
+    ports:
+      - "127.0.0.1:${API_HOST_PORT:-8080}:8080"
+    volumes:
+      - api_data:/data
+    depends_on:
+      mysql:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      mailpit:
+        condition: service_started
+      clamav:
+        condition: service_healthy
+    restart: unless-stopped
+
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-docping}
+      MYSQL_USER: ${MYSQL_USER:-docping}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Defina MYSQL_PASSWORD no .env}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Defina MYSQL_ROOT_PASSWORD no .env}
+      TZ: UTC
+    ports:
+      - "127.0.0.1:3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    restart: unless-stopped
+
+  minio:
+    # A distribuição Community atual pede build a partir da fonte. Veja infra/README.md.
+    build:
+      context: ./infra
+      dockerfile: minio.Dockerfile
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:?Defina S3_ACCESS_KEY no .env}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:?Defina S3_SECRET_KEY no .env}
+    command: ["server", "/data", "--console-address", ":9001"]
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    restart: unless-stopped
+
+  mailpit:
+    image: axllent/mailpit:v1.31.6
+    ports:
+      - "127.0.0.1:8025:8025"
+      - "127.0.0.1:1025:1025"
+    environment:
+      MP_MAX_MESSAGES: "500"
+      MP_DATABASE: /data/mailpit.db
+    volumes:
+      - mailpit_data:/data
+    restart: unless-stopped
+
+  clamav:
+    # Debian oficial multi-arquitetura; a variante Alpine não oferece ARM64.
+    image: clamav/clamav:1.4.6-debian@sha256:c7df83a4c9794aeb43b7cff296fc9f42a0f47cbf0e96704510e7e5b57b2f4913
+    volumes:
+      - clamav_data:/var/lib/clamav
+    healthcheck:
+      test: ["CMD", "clamdcheck.sh"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 6m
+    # Porta de varredura permanece apenas na rede interna do Compose.
+    restart: unless-stopped
+
+volumes:
+  api_data:
+  mysql_data:
+  minio_data:
+  mailpit_data:
+  clamav_data:

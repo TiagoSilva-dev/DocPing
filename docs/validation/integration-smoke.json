@@ -1,0 +1,100 @@
+{
+  "status": "passed",
+  "completedAt": "2026-10-20T03:12:38.995Z",
+  "elapsedMs": 2332,
+  "checks": [
+    {
+      "name": "local services respond",
+      "status": "passed",
+      "elapsedMs": 30
+    },
+    {
+      "name": "signup, session cookie and empty real organization",
+      "status": "passed",
+      "elapsedMs": 202
+    },
+    {
+      "name": "client and reusable template persisted",
+      "status": "passed",
+      "elapsedMs": 81
+    },
+    {
+      "name": "CSRF is enforced on authenticated mutations",
+      "status": "passed",
+      "elapsedMs": 4
+    },
+    {
+      "name": "request, snapshot and public link persisted",
+      "status": "passed",
+      "elapsedMs": 84
+    },
+    {
+      "name": "PDF passes actual ClamAV and private MinIO round trip",
+      "status": "passed",
+      "elapsedMs": 48
+    },
+    {
+      "name": "PNG passes actual ClamAV and independent upload",
+      "status": "passed",
+      "elapsedMs": 49
+    },
+    {
+      "name": "unauthenticated file and unsigned MinIO object denied",
+      "status": "passed",
+      "elapsedMs": 5
+    },
+    {
+      "name": "unrelated organization cannot query, mutate or download",
+      "status": "passed",
+      "elapsedMs": 212
+    },
+    {
+      "name": "SMTP accepted by actual Mailpit and message exists",
+      "status": "passed",
+      "elapsedMs": 98
+    },
+    {
+      "name": "actual ClamAV rejects harmless EICAR signature",
+      "status": "passed",
+      "elapsedMs": 13
+    },
+    {
+      "name": "targeted correction preserves unaffected file and history",
+      "status": "passed",
+      "elapsedMs": 151
+    },
+    {
+      "name": "approval completes request and closes additional uploads",
+      "status": "passed",
+      "elapsedMs": 55
+    },
+    {
+      "name": "authorized ZIP contains only current synthetic documents",
+      "status": "passed",
+      "elapsedMs": 7
+    },
+    {
+      "name": "sensitive request requires browser-specific actual email code",
+      "status": "passed",
+      "elapsedMs": 208
+    },
+    {
+      "name": "public token cannot download another requests private file",
+      "status": "passed",
+      "elapsedMs": 3
+    },
+    {
+      "name": "revoked link no longer grants portal or file access",
+      "status": "passed",
+      "elapsedMs": 54
+    },
+    {
+      "name": "actual MySQL8 TestMySQLRoundTrip",
+      "status": "passed",
+      "elapsedMs": 1026
+    }
+  ],
+  "notExecuted": [
+    "Browser/Playwright usability and responsive tests"
+  ]
+}

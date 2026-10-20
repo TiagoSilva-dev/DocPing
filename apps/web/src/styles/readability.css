@@ -1,0 +1,615 @@
+/* Final scale and contrast refinements shared by the workspace. */
+.nav-item {
+  font-size: 13px;
+}
+.workspace-switch strong {
+  font-size: 12px;
+}
+.workspace-switch small {
+  font-size: 10px;
+}
+.profile-button strong {
+  font-size: 12px;
+}
+.profile-button small {
+  font-size: 10px;
+}
+.page-description {
+  font-size: 13px;
+}
+.dp-button {
+  font-size: 12px !important;
+}
+.panel-title h2 {
+  font-size: 15px;
+}
+.input,
+.select,
+.textarea {
+  font-size: 13px;
+}
+.field-label {
+  font-size: 12px;
+}
+.topbar-left {
+  font-size: 12px;
+}
+.topbar-search {
+  font-size: 11px;
+}
+.sidebar-tip p {
+  font-size: 11px;
+}
+.sidebar-tip .tip-topline {
+  font-size: 11px;
+}
+.sidebar-tip button {
+  font-size: 11px;
+}
+.sidebar {
+  overflow-y: auto;
+}
+.sidebar > * {
+  flex-shrink: 0;
+}
+.sidebar-bottom {
+  padding-top: 28px;
+}
+.dashboard .page-description {
+  font-size: 13px;
+}
+.dashboard .page-heading .eyebrow {
+  font-size: 10px;
+  letter-spacing: 1.1px;
+}
+.metric-label {
+  font-size: 12px;
+  line-height: 1.5;
+}
+.metric p {
+  font-size: 11px;
+}
+.metric {
+  padding: 19px 20px;
+}
+.metric-value {
+  font-size: 32px;
+}
+.attention-row-info h3 {
+  font-size: 13px;
+}
+.attention-row-info p {
+  font-size: 11px;
+}
+.attention-action {
+  font-size: 11px;
+}
+.panel-title p {
+  font-size: 11px;
+}
+.attention-footer {
+  font-size: 11px;
+  height: 41px;
+}
+.closing-eyebrow {
+  font-size: 10px;
+  letter-spacing: 0.8px;
+}
+.closing-legend > div,
+.closing-legend strong {
+  font-size: 11px;
+}
+.closing-summary p {
+  font-size: 11px;
+}
+.closing-footer {
+  font-size: 10px;
+}
+.closing-panel {
+  display: flex;
+  flex-direction: column;
+}
+.closing-legend {
+  flex: 1;
+}
+.request-table th {
+  font-size: 11px;
+}
+.request-table td {
+  font-size: 12px;
+}
+.table-client strong {
+  font-size: 12px;
+}
+.table-client small {
+  font-size: 10px;
+}
+.competence-text,
+.deadline-cell {
+  font-size: 11px;
+}
+.status-badge {
+  font-size: 10px;
+}
+.last-activity {
+  font-size: 10px;
+}
+.request-tabs button {
+  font-size: 11px;
+}
+.request-tabs button > span > span {
+  font-size: 9px;
+}
+.table-bottom {
+  font-size: 10px;
+}
+.progress-cell > .mono,
+.progress-cell small {
+  font-size: 10px;
+}
+.requests-page .request-tabs button {
+  font-size: 11px;
+}
+.requests-page .table-client strong {
+  font-size: 12px;
+}
+.requests-page .table-client small {
+  font-size: 10px;
+}
+.search-field input {
+  font-size: 12px;
+}
+.small-select select {
+  font-size: 11px;
+}
+.create-main-header p {
+  font-size: 12px;
+}
+.client-selection-item strong {
+  font-size: 12px;
+}
+.client-selection-item small {
+  font-size: 11px;
+}
+.review-document-row strong {
+  font-size: 12px;
+}
+.review-document-row small {
+  font-size: 10px;
+}
+.viewer-heading h2 {
+  font-size: 15px;
+}
+.viewer-heading p {
+  font-size: 11px;
+}
+.detail-meta > span:not(.status-badge) {
+  font-size: 12px;
+}
+.review-actionbar .dp-button {
+  font-size: 11px !important;
+}
+.review-actionbar > span {
+  font-size: 10px;
+}
+.file-meta-bar strong {
+  font-size: 11px;
+}
+.file-meta-bar small {
+  font-size: 10px;
+}
+.review-documents-heading p {
+  font-size: 11px;
+}
+.review-documents-heading h2 {
+  font-size: 14px;
+}
+.share-options > button p {
+  font-size: 11px;
+}
+.sample-file-note {
+  font-size: 10px;
+}
+.review-layout {
+  grid-template-columns: 275px minmax(0, 1fr);
+}
+.not-found-page {
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 24px;
+  padding: 35px;
+  text-align: center;
+}
+.not-found-page > .mono {
+  font-size: 90px;
+  line-height: 1;
+  color: #d4dfc8;
+}
+.not-found-page > h1 {
+  font-size: 28px;
+  letter-spacing: -0.7px;
+}
+.not-found-page > p {
+  font-size: 13px;
+  color: var(--muted);
+}
+@media (max-width: 1200px) {
+  .metric {
+    padding: 17px 16px;
+  }
+  .metric-label {
+    font-size: 11px;
+  }
+  .metric p {
+    font-size: 10px;
+  }
+  .attention-row-info h3 {
+    font-size: 12px;
+  }
+  .attention-row-info p {
+    font-size: 10px;
+  }
+  .attention-action {
+    font-size: 10px;
+  }
+  .review-layout {
+    grid-template-columns: 235px minmax(0, 1fr);
+  }
+  .detail-meta > span:not(.status-badge) {
+    font-size: 11px;
+  }
+  .review-actionbar {
+    flex-wrap: wrap;
+  }
+  .review-actionbar > div {
+    margin-left: auto;
+  }
+  .table-client strong,
+  .requests-page .table-client strong {
+    font-size: 11px;
+  }
+  .request-table th {
+    font-size: 10px;
+  }
+  .request-table .status-badge {
+    font-size: 10px;
+  }
+  .closing-legend > div,
+  .closing-legend strong {
+    font-size: 10px;
+  }
+  .closing-summary p {
+    font-size: 10px;
+  }
+  .closing-eyebrow {
+    font-size: 9px;
+  }
+}
+@media (max-width: 1000px) {
+  .closing-panel {
+    display: none;
+  }
+  .review-layout {
+    grid-template-columns: 1fr;
+  }
+  .review-document-row {
+    flex-basis: 210px;
+  }
+  .metric-label {
+    font-size: 10px;
+  }
+  .metric p {
+    font-size: 10px;
+    min-height: 30px;
+  }
+  .metric-label svg {
+    display: none;
+  }
+  .metric-value {
+    font-size: 30px;
+  }
+  .table-client strong {
+    font-size: 11px;
+  }
+  .request-table .table-client small {
+    font-size: 10px;
+  }
+  .request-table {
+    min-width: 700px;
+  }
+  .dashboard .page-heading .eyebrow {
+    font-size: 9px;
+    letter-spacing: 0.9px;
+  }
+  .sidebar-tip {
+    display: none;
+  }
+  .requests-page .request-tabs button {
+    font-size: 10px;
+  }
+  .requests-toolbar-right {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .file-meta-bar strong {
+    max-width: 220px;
+  }
+}
+@media (max-width: 700px) {
+  .nav-item {
+    font-size: 14px;
+  }
+  .page-description,
+  .dashboard .page-description {
+    font-size: 13px;
+  }
+  .input,
+  .select,
+  .textarea {
+    font-size: 16px;
+  }
+  .field-label {
+    font-size: 13px;
+  }
+  .sidebar-tip {
+    display: block;
+  }
+  .sidebar-tip p,
+  .sidebar-tip button,
+  .sidebar-tip .tip-topline {
+    font-size: 11px;
+  }
+  .topbar-left {
+    font-size: 12px;
+  }
+  .metric-label {
+    font-size: 11px;
+  }
+  .metric-label svg {
+    display: block;
+    width: 14px;
+  }
+  .metric p {
+    font-size: 10px;
+    min-height: 0;
+  }
+  .metric {
+    padding: 17px 16px;
+  }
+  .metric-value {
+    font-size: 32px;
+  }
+  .attention-row-info h3 {
+    font-size: 12px;
+  }
+  .attention-row-info p {
+    font-size: 10px;
+  }
+  .attention-action {
+    font-size: 10px;
+    max-width: 87px;
+    gap: 4px;
+  }
+  .attention-list {
+    padding: 0 14px;
+  }
+  .attention-row {
+    gap: 9px;
+  }
+  .request-tabs button {
+    font-size: 11px;
+    padding: 6px 8px;
+  }
+  .attention-footer {
+    font-size: 11px;
+  }
+  .panel-title p {
+    font-size: 10px;
+  }
+  .request-table th {
+    font-size: 11px;
+  }
+  .table-bottom {
+    font-size: 10px;
+  }
+  .request-table {
+    min-width: 740px;
+  }
+  .create-main-header p {
+    font-size: 12px;
+  }
+  .client-selection-item strong {
+    font-size: 13px;
+  }
+  .client-selection-item small {
+    font-size: 11px;
+  }
+  .detail-meta > span:not(.status-badge) {
+    font-size: 11px;
+  }
+  .review-actionbar .dp-button {
+    font-size: 11px !important;
+  }
+  .sample-file-note {
+    font-size: 10px;
+  }
+  .review-documents-heading p {
+    font-size: 10px;
+  }
+  .review-document-row strong {
+    font-size: 12px;
+  }
+  .review-document-row small {
+    font-size: 10px;
+  }
+  .viewer-heading p {
+    font-size: 11px;
+  }
+  .viewer-heading h2 {
+    font-size: 14px;
+  }
+  .viewer-heading {
+    flex-wrap: wrap;
+  }
+  .portal-document-heading strong {
+    font-size: 14px;
+  }
+  .portal-document-heading small {
+    font-size: 11px;
+  }
+  .portal-intro > p {
+    font-size: 14px;
+  }
+  .portal-item-instruction {
+    font-size: 12px;
+  }
+  .portal-upload-area > p {
+    font-size: 12px;
+  }
+  .portal-camera,
+  .portal-upload-buttons .dp-button {
+    font-size: 12px !important;
+  }
+  .portal-upload-buttons {
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .portal-due {
+    font-size: 11px;
+  }
+  .portal-autosave p {
+    font-size: 12px;
+  }
+  .portal-autosave strong {
+    font-size: 13px;
+  }
+  .portal-help-card p {
+    font-size: 11px;
+  }
+  .portal-upload-area > small {
+    font-size: 10px;
+  }
+  .portal-correction p {
+    font-size: 12px;
+  }
+  .portal-progress-card > div:first-child > span {
+    font-size: 11px;
+  }
+  .portal-document-body {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+  .portal-sent-files strong {
+    font-size: 11px;
+  }
+  .portal-sent-files small {
+    font-size: 10px;
+  }
+  .portal-sent-files > button > span {
+    width: 25px;
+  }
+  .portal-document-heading {
+    gap: 9px;
+  }
+  .portal-demo-notice {
+    font-size: 10px;
+  }
+  .portal-progress-card > p {
+    font-size: 11px;
+  }
+  .portal-upload-area {
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+  .share-options > button p {
+    font-size: 11px;
+  }
+}
+
+.communication-alert {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid #e8dfc6;
+  border-radius: 8px;
+  background: #fbf7e9;
+  color: #826b42;
+  margin-bottom: 22px;
+}
+.communication-alert > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+}
+.communication-alert strong {
+  font-size: 12px;
+  font-weight: 500;
+}
+.communication-alert span {
+  font-size: 11px;
+  color: #88734e;
+}
+.communication-alert button {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 0 7px 12px;
+  font-size: 11px;
+  border: 0;
+  background: transparent;
+  color: #7b6540;
+}
+.communication-history-link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  width: 100%;
+  padding: 14px 10px;
+  border: 0;
+  border-top: 1px solid var(--border);
+  background: #fbfcf8;
+  border-radius: 0 0 6px 6px;
+  font-size: 11px;
+  color: #587448;
+}
+.communication-history-link:hover {
+  background: #f0f5e9;
+}
+@media (max-width: 700px) {
+  .communication-alert {
+    align-items: flex-start;
+    gap: 9px;
+    padding: 14px;
+    flex-wrap: wrap;
+  }
+  .communication-alert > div {
+    min-width: 230px;
+  }
+  .communication-alert button {
+    margin-left: 26px;
+    padding-left: 0;
+    font-size: 11px;
+  }
+  .communication-alert span {
+    line-height: 1.7;
+  }
+  .communication-alert > svg {
+    margin-top: 2px;
+  }
+}
+
+.demo-label {
+  display: flex;
+}
+
+.portal-page .dp-button,
+.portal-error-page .dp-button {
+  min-height: 44px;
+  height: 44px;
+}
