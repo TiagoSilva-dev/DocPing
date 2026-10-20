@@ -72,7 +72,9 @@ services:
   # pesados: só sobem quando a análise automática é usada.
   docling:
     profiles: ["ai"]
-    image: quay.io/docling-project/docling-serve:v1.37.0
+    # CPU-only build: the default image carries the CUDA PyTorch stack and
+    # weighs 15.4 GB, which no managed host will pull comfortably.
+    image: quay.io/docling-project/docling-serve-cpu:v1.37.0
     environment:
       DOCLING_SERVE_ENABLE_UI: "false"
       DOCLING_SERVE_MAX_SYNC_WAIT: "600"

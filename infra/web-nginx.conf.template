@@ -13,14 +13,21 @@ http {
   uwsgi_temp_path /tmp/uwsgi_temp;
   scgi_temp_path /tmp/scgi_temp;
   server {
-    listen 8080;
+    listen ${PORT};
     server_name _;
     root /usr/share/nginx/html;
     client_max_body_size 51m;
     add_header X-Content-Type-Options nosniff always;
     add_header Referrer-Policy no-referrer always;
     location /api/ {
-      proxy_pass http://api:8080;
+      # nginx resolves a literal upstream once, at startup, and refuses to boot
+      # if the name does not exist yet. On a managed host the API service may
+      # come up after this one, which would leave the site crash-looping. A
+      # variable in proxy_pass defers resolution to request time instead, and
+      # NGINX_LOCAL_RESOLVERS is exported by the image's own entrypoint.
+      resolver ${NGINX_LOCAL_RESOLVERS} valid=10s;
+      set $docping_api ${API_UPSTREAM};
+      proxy_pass $docping_api$request_uri;
       proxy_http_version 1.1;
       proxy_set_header Host $host;
       proxy_set_header X-Forwarded-Proto $scheme;
