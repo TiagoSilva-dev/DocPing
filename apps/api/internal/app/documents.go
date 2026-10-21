@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"log"
 	"mime"
 	"net/http"
 	"path/filepath"
@@ -145,6 +146,11 @@ func (a *App) uploadHTTP(w http.ResponseWriter, r *http.Request) {
 		prepared.Analysis = &domain.Analysis{Status: "queued", RequestedAt: domain.Now()}
 	}
 	if err = a.Objects.Put(ctx, prepared.ObjectKey, kind, data); err != nil {
+		// The client is told only that the upload failed, but the operator needs
+		// the provider's reason: a bucket that does not confirm the required
+		// SSE-S3 encryption fails here and is otherwise indistinguishable from
+		// an outage.
+		log.Print("object storage rejected an upload: ", err)
 		writeError(w, fail(503, "storage_unavailable", "Não foi possível salvar o arquivo. Tente novamente."))
 		return
 	}
