@@ -98,6 +98,13 @@ deduplication and quotas, and orphan objects are cleaned up on failure. The scan
 closed: the only bypass is `ALLOW_UNSCANNED_UPLOADS=true` in development, which marks files
 `unscanned_development`.
 
+Production also demands the provider confirm SSE-S3 (`AES256`) on each object, deleting
+it and failing when it does not. `S3_ACCEPT_UNCONFIRMED_ENCRYPTION=true` is a deliberate,
+operator-set opt-out for providers that encrypt at rest without reporting it — Cloudflare
+R2 leaves the header unimplemented and Railway's bucket omits it. It is never the default,
+it turns a checked fact into trust in the provider, and the server logs a warning at every
+start while it is on.
+
 ### Automated document analysis
 
 `internal/analysis` is a leaf package with no persistence: `Extractor` (Docling, with

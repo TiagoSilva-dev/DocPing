@@ -60,9 +60,14 @@ type fakeRoundTripper func(*http.Request) (*http.Response, error)
 func (f fakeRoundTripper) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 func TestProductionSSERequiredAndAcknowledged(t *testing.T) {
 	for _, tc := range []struct {
-		name                       string
-		production, ack, wantError bool
-	}{{"production encrypted", true, true, false}, {"production missing confirmation", true, false, true}, {"development no SSE requirement", false, false, false}} {
+		name                               string
+		production, ack, accept, wantError bool
+	}{
+		{"production encrypted", true, true, false, false},
+		{"production missing confirmation", true, false, false, true},
+		{"production accepting an unconfirmed provider", true, false, true, false},
+		{"development no SSE requirement", false, false, false, false},
+	} {
 		t.Run(tc.name, func(t *testing.T) {
 			deletes := 0
 			transport := fakeRoundTripper(func(r *http.Request) (*http.Response, error) {
@@ -95,13 +100,16 @@ func TestProductionSSERequiredAndAcknowledged(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			o := &Objects{client: client, bucket: "private-fixture", requireEncryption: tc.production}
+			o := &Objects{client: client, bucket: "private-fixture", requireEncryption: tc.production, acceptUnconfirmed: tc.accept}
 			err = o.Put(context.Background(), "synthetic-object", "application/pdf", []byte("fixture"))
 			if (err != nil) != tc.wantError {
 				t.Fatalf("error=%v wantError=%v", err, tc.wantError)
 			}
 			if tc.wantError && deletes != 1 {
 				t.Fatal("unconfirmed object was not removed")
+			}
+			if !tc.wantError && deletes != 0 {
+				t.Fatal("an accepted object was removed anyway")
 			}
 		})
 	}

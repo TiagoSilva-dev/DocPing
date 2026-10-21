@@ -28,10 +28,11 @@ type Objects struct {
 	scanner           string
 	bypass            bool
 	requireEncryption bool
+	acceptUnconfirmed bool
 }
 
-func New(ctx context.Context, dir, endpoint, bucket, access, secret, scanner, env string, bypass bool) (*Objects, error) {
-	o := &Objects{dir: filepath.Join(dir, "objects"), bucket: bucket, scanner: scanner, bypass: bypass && env == "development", requireEncryption: env == "production"}
+func New(ctx context.Context, dir, endpoint, bucket, access, secret, scanner, env string, bypassScan, acceptUnconfirmedEncryption bool) (*Objects, error) {
+	o := &Objects{dir: filepath.Join(dir, "objects"), bucket: bucket, scanner: scanner, bypass: bypassScan && env == "development", requireEncryption: env == "production", acceptUnconfirmed: acceptUnconfirmedEncryption}
 	if env != "development" && scanner == "" {
 		return nil, errors.New("CLAMAV_ADDRESS is required outside development")
 	}
@@ -77,7 +78,14 @@ func (o *Objects) Put(ctx context.Context, key, mime string, data []byte) error 
 		}
 		if o.requireEncryption {
 			info, err := o.client.StatObject(ctx, o.bucket, key, minio.StatObjectOptions{VersionID: uploaded.VersionID})
-			if err != nil || info.Metadata.Get("X-Amz-Server-Side-Encryption") != "AES256" {
+			confirmed := err == nil && info.Metadata.Get("X-Amz-Server-Side-Encryption") == "AES256"
+			// acceptUnconfirmed exists because some providers encrypt at rest
+			// without reporting it -- Cloudflare R2 leaves the header
+			// unimplemented, and Railway's bucket omits it. Turning it on trades
+			// a checked fact for trust in the provider, so it is never the
+			// default: the operator sets S3_ACCEPT_UNCONFIRMED_ENCRYPTION and
+			// the server says so at every start.
+			if !confirmed && !o.acceptUnconfirmed {
 				cleanup, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 				_ = o.client.RemoveObject(cleanup, o.bucket, key, minio.RemoveObjectOptions{VersionID: uploaded.VersionID})
 				cancel()

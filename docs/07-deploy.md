@@ -1,6 +1,6 @@
 # 07 — Deploy em produção
 
-Topologia: **tudo na Railway**, menos os arquivos. O navegador fala com um
+Topologia: **tudo na Railway**, arquivos incluídos. O navegador fala com um
 único domínio, o que mantém o cookie de sessão `SameSite=Lax` funcionando e
 deixa o upload de 20 MB passar sem intermediário.
 
@@ -13,7 +13,7 @@ navegador
                                                    ├── MySQL      (Railway)
                                                    ├── ClamAV     (Railway)
                                                    ├── Docling    (Railway, opcional)
-                                                   └── S3         (externo — ver abaixo)
+                                                   └── Bucket S3  (Railway — ver "Os arquivos")
 ```
 
 Não há serviço de front separado: `apps/web/Dockerfile` compila a SPA e a serve
@@ -100,10 +100,11 @@ STORE_DRIVER=mysql
 MYSQL_DSN=${{MySQL.MYSQLUSER}}:${{MySQL.MYSQL_ROOT_PASSWORD}}@tcp(${{MySQL.RAILWAY_PRIVATE_DOMAIN}}:3306)/${{MySQL.MYSQL_DATABASE}}?parseTime=true&tls=docping-ca
 MYSQL_CA_CERT=-----BEGIN CERTIFICATE-----...  # ver "O TLS do MySQL"
 
-S3_ENDPOINT=https://...                       # provedor que confirme SSE-S3
-S3_BUCKET=docping
-S3_ACCESS_KEY=...
-S3_SECRET_KEY=...
+S3_ENDPOINT=${{docping-files.ENDPOINT}}
+S3_BUCKET=${{docping-files.BUCKET}}
+S3_ACCESS_KEY=${{docping-files.ACCESS_KEY_ID}}
+S3_SECRET_KEY=${{docping-files.SECRET_ACCESS_KEY}}
+S3_ACCEPT_UNCONFIRMED_ENCRYPTION=true         # ver "Os arquivos"
 
 CLAMAV_ADDRESS=clamav.railway.internal:3310
 
@@ -192,38 +193,70 @@ Duas coisas, ambas descobertas na prática:
 Quando o scanner não responde, o upload falha **fechado**, com
 `503 scan_failed` — é o comportamento desejado, não um defeito.
 
-## Os arquivos — e por que não é no R2
+## Os arquivos
+
+Ficam no **bucket da própria Railway**, com a confirmação de criptografia
+dispensada por decisão explícita de quem opera. Isso precisa de contexto.
 
 `storage.go` exige, em produção, que o provedor confirme `SSE-S3` com
 `x-amz-server-side-encryption: AES256` na resposta de cada objeto; se não vier,
-o objeto é apagado e o upload falha com
-`S3 provider did not confirm required SSE-S3 encryption`. A verificação existe
-para que metadado de arquivo só fique visível depois que o provedor confirmou a
-criptografia.
+o objeto é apagado e o upload falha. A verificação existe para que metadado de
+arquivo só fique visível depois que o provedor confirmou a criptografia.
 
-Isso descarta dois candidatos:
+Nenhum dos dois candidatos disponíveis confirma:
 
-- **Cloudflare R2** — que era o plano original deste documento. A tabela de
-  compatibilidade S3 da Cloudflare marca `x-amz-server-side-encryption` como
-  **não implementado** no `PutObject`, `CopyObject`, `CreateMultipartUpload` e
-  `UploadPart`; só os headers de SSE-C são implementados. O R2 criptografa em
-  repouso, mas não declara, e por isso não passa no gate.
-- **Bucket da própria Railway** — aceita o upload e não devolve o header.
-  Testado contra o deploy real: falha com a mensagem acima.
+- **Bucket da Railway** — aceita o upload e não devolve o header. Testado
+  contra o deploy real.
+- **Cloudflare R2**, o plano original deste documento — testado com credencial
+  real, pelo mesmo cliente minio-go e o mesmo `encrypt.NewSSE()` que a API usa:
 
-Compatíveis, por documentação do provedor:
+  | Passo | Resultado |
+  |---|---|
+  | `BucketExists` | ok |
+  | `PutObject` com SSE-S3 | aceito, sem erro |
+  | `StatObject` **com** `versionId` | `501 Not Implemented` |
+  | `StatObject` **sem** `versionId` | ok |
+  | Header SSE na resposta | ausente — metadata traz só `Content-Type` |
 
-- **AWS S3** — SSE-S3 ligada por padrão em bucket novo desde 2023, e o
-  `HeadObject` devolve o header.
-- **Backblaze B2** — aceita `AES256` no `PutObject` (seleciona SSE-B2) e o
-  `HeadObject` devolve `x-amz-server-side-encryption: AES256`.
+  Confirma a tabela de compatibilidade S3 da Cloudflare, que marca
+  `x-amz-server-side-encryption` como não implementado no `PutObject`.
 
-`infra/minio.Dockerfile` é, como diz o próprio arquivo, de uso local. Produção
-deve usar um S3 gerenciado com criptografia.
+Compatíveis, por documentação do provedor, caso se queira voltar a ter a
+confirmação: **AWS S3** (SSE-S3 por padrão desde 2023) e **Backblaze B2**
+(aceita `AES256` no `PutObject` e devolve o header no `HeadObject`).
+
+### A dispensa, e o que ela custa
+
+`S3_ACCEPT_UNCONFIRMED_ENCRYPTION=true` mantém o arquivo mesmo sem a
+confirmação. O que se perde é preciso: a criptografia em repouso deixa de ser
+**fato verificado** e passa a ser **confiança no provedor**. A Railway e a
+Cloudflare declaram criptografar tudo em repouso com chaves próprias; o app
+deixa de ter como checar isso.
+
+Ela nunca é o padrão — sem a variável, o comportamento antigo vale inteiro,
+com teste cobrindo a recusa e a remoção do objeto — e a API registra um aviso
+em todo start enquanto estiver ligada.
+
+### Uma fragilidade registrada, não corrigida
+
+O R2 **devolve** um `VersionID` no `PutObject` mas não implementa HEAD
+versionado. O `storage.go` guarda esse id e o usa na verificação, levando um
+`501` por motivo que nada tem a ver com criptografia. Falha fechado, então não
+é brecha; mas qualquer provedor com esse comportamento quebra o upload sem que
+a mensagem explique o porquê.
+
+### O domínio público
+
+O bucket do R2 tinha um domínio `pub-*.r2.dev` ativo. Objeto em bucket deste
+app nunca deve ser público: o download passa por `GET /api/files/{id}`
+justamente para ser autorizado, e as chaves (`orgID/requestID/fileID`) são
+aleatórias mas não são controle de acesso.
 
 ## Ordem de criação
 
-1. Bucket privado num provedor que **confirme SSE-S3** (acima), com chave.
+1. Bucket privado. Confirmando SSE-S3 (AWS S3, Backblaze B2), nada mais é
+   preciso; não confirmando (bucket da Railway, R2), é necessário ligar
+   `S3_ACCEPT_UNCONFIRMED_ENCRYPTION` — leia antes o que isso custa.
 2. Provedor de SMTP com TLS e remetente verificado.
 3. Projeto na Railway.
 4. Serviço `MySQL` a partir de `infra/mysql.Dockerfile`, com volume em
@@ -255,8 +288,6 @@ Executado contra a Railway e observado funcionando:
 
 Sem validação:
 
-- **Upload não conclui** — barrado no gate de SSE-S3, à espera da escolha de
-  provedor.
 - **E-mail não sai** — `SMTP_HOST` é placeholder, por decisão de quem operou o
   deploy. As entregas ficam registradas como falha.
 - Análise automática desligada; `docling` não foi criado.

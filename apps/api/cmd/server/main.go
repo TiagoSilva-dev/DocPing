@@ -28,10 +28,13 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	startup, cancel := context.WithTimeout(ctx, 30*time.Second)
-	objects, err := storage.New(startup, config.DataDir, config.S3Endpoint, config.S3Bucket, config.S3Access, config.S3Secret, config.Scanner, config.Env, config.AllowUnscanned)
+	objects, err := storage.New(startup, config.DataDir, config.S3Endpoint, config.S3Bucket, config.S3Access, config.S3Secret, config.Scanner, config.Env, config.AllowUnscanned, config.S3AcceptUnconfirmedEncryption)
 	cancel()
 	if err != nil {
 		log.Fatal("private storage unavailable: ", err)
+	}
+	if config.S3AcceptUnconfirmedEncryption {
+		log.Print("WARNING: S3_ACCEPT_UNCONFIRMED_ENCRYPTION is on -- an uploaded file is kept even when the provider does not confirm SSE-S3; encryption at rest is trusted, not verified")
 	}
 	application := &app.App{Config: config, Store: store, Objects: objects}
 	server := &http.Server{Addr: ":" + config.Port, Handler: application.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 90 * time.Second, WriteTimeout: 120 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20}

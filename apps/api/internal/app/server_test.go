@@ -30,7 +30,7 @@ func setup(t *testing.T) (*App, http.Handler) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	obj, err := storage.New(context.Background(), dir, "", "", "", "", "", "development", true)
+	obj, err := storage.New(context.Background(), dir, "", "", "", "", "", "development", true, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -300,7 +300,7 @@ func TestScannerFailsClosedAndJSONProductionRejected(t *testing.T) {
 	if _, err := persistence.Open("json", "", filepath.Join(dir, "state.json"), "production"); err == nil {
 		t.Fatal("production JSON allowed")
 	}
-	obj, err := storage.New(context.Background(), dir, "", "", "", "", "", "development", false)
+	obj, err := storage.New(context.Background(), dir, "", "", "", "", "", "development", false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
