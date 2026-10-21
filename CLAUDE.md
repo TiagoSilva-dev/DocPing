@@ -122,8 +122,10 @@ transaction that stores — and in `auto` mode applies — the verdict.
 ### Config is the safety boundary
 
 `internal/app/config.go` refuses to start when `APP_ENV=production` lacks HTTPS origin,
-MySQL with `tls=true`, private S3, ClamAV or TLS SMTP, or when any development bypass is
-set. It likewise refuses `AI_REVIEW_ENABLED=true` without `TYPESAFE_API_KEY`, without an
+verified-TLS MySQL, private S3, ClamAV or TLS SMTP, or when any development bypass is
+set. Verified TLS means `tls=true` against the system roots, or `tls=docping-ca` with a
+PEM in `MYSQL_CA_CERT` — same chain and hostname check, different trust anchor, and
+refused outright when the CA is missing or unparsable. `tls=skip-verify` stays rejected. It likewise refuses `AI_REVIEW_ENABLED=true` without `TYPESAFE_API_KEY`, without an
 extractor URL, with a non-HTTPS TypeSafe endpoint, or with a confidence threshold outside
 0.5–1 — a threshold a typo turned into zero would approve every document. There is no
 automatic fallback from MySQL to JSON. Preserve this: new capabilities that weaken
