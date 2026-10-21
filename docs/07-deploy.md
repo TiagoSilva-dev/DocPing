@@ -48,8 +48,14 @@ do PyTorch e pesa **15,4 GB**, o que nenhum host gerenciado puxa com conforto.
 A `docling-serve-cpu` fica na casa de 2 a 3 GB. O `docker-compose.yml` já aponta
 para ela.
 
-O Docling baixa os modelos no primeiro uso. Monte um volume em
-`/opt/app-root/src/.cache`, senão cada reinício refaz o download.
+**Não monte volume no cache de modelos.** Os pesos vêm embutidos na imagem —
+o serviço registra no start `artifacts_path is set to a valid directory. No
+model weights will be downloaded at runtime`. Um volume vazio montado em
+`/opt/app-root/src/.cache` esconderia esses pesos, que é o mesmo acidente
+descrito em "O ClamAV". Sem volume o serviço sobe em cerca de 10 segundos.
+
+Medido em produção: 2,18 GB comprimidos em `linux/amd64` (14 camadas) e
+**1,27 GB de RAM ocioso**, com CPU perto de zero fora de uma conversão.
 
 ## O que a Railway não faz como se espera
 
@@ -65,6 +71,12 @@ Três comportamentos custaram tempo e vale registrar:
   `&&`, `;` nem redirecionamento, e um `sh -c '...'` ali é desembrulhado: o
   primeiro token acaba tratado como executável. Qualquer bootstrap de várias
   etapas precisa virar entrypoint numa imagem, como em `infra/mysql.Dockerfile`.
+- **O uvicorn só escuta IPv4 por padrão.** A rede interna da Railway é IPv6, e
+  `UVICORN_HOST` vem como `0.0.0.0`, então `docling.railway.internal:5001`
+  ficaria inalcançável sem erro visível na API — só análises falhando. O serviço
+  `docling` leva `UVICORN_HOST=::`, e o log confirma com
+  `Uvicorn running on http://[::]:5001`. O ClamAV **não** precisa disso: o clamd
+  escuta nas duas famílias quando o container tem IPv6 global.
 - **A branch não ficou gravada no serviço.** Apontar o serviço para uma branch
   que não é a padrão do repositório não persistiu, e os deploys seguintes saíram
   de `main`. Hoje `api` e `web` estão fixados por commit, o que é determinístico
@@ -115,9 +127,11 @@ SMTP_USERNAME=...
 SMTP_PASSWORD=...
 SMTP_REQUIRE_TLS=true
 
-# Opcional — a API recusa subir se ligado e incompleto
-AI_REVIEW_ENABLED=false
+# Análise automática — a API recusa subir se ligado e incompleto
+AI_REVIEW_ENABLED=true
 DOCLING_URL=http://docling.railway.internal:5001
+DOCLING_API_KEY=...            # mesmo valor de DOCLING_SERVE_API_KEY no docling
+DOCLING_OCR_LANG=pt
 TYPESAFE_API_KEY=...
 TYPESAFE_API_URL=https://api.typesafe.ai
 ```
@@ -274,6 +288,20 @@ Com IA, acrescente o `docling` e só então ligue `AI_REVIEW_ENABLED=true`.
 Deixe os escritórios em `suggest` — os limiares seguem sem calibração, como
 registra `docs/06-validacao-da-entrega.md`.
 
+### Um motor basta, mas não qualquer um
+
+O `config.go` exige `TYPESAFE_API_KEY` e **`DOCLING_URL` ou `PADDLEOCR_URL`**,
+e o `Chain` aceita primário ou fallback nulo. Só que os dois não são
+equivalentes, e **PaddleOCR sozinho é perigoso**: com `Primary` nulo, uma falha
+do Paddle faz `Chain.Extract` devolver texto vazio e erro nil, e o
+`analyzer.go` lê texto vazio como constatação — veredito `rejected` com
+confiança 1. Em modo `auto`, isso rejeitaria sozinho o documento bom de um
+cliente porque o OCR estava fora. Com Docling sozinho não acontece: `Fallback`
+nulo propaga o erro, o status vira `failed` e o item vai para revisão humana.
+
+O Docling também é o motor que preserva tabela, e faz OCR por conta própria
+(`do_ocr: true`), cobrindo PDF escaneado e foto. Este deploy usa **só Docling**.
+
 ## O que foi validado em produção, e o que não
 
 Executado contra a Railway e observado funcionando:
@@ -285,12 +313,20 @@ Executado contra a Railway e observado funcionando:
 - ClamAV varrendo: o upload de teste passou pela varredura.
 - Fluxo de escritório: registro, criação de cliente, modelos semeados,
   criação de solicitação e geração de link do portal, todos `200`.
+- Upload completo: varredura `clean`, objeto gravado e baixado de volta com os
+  bytes idênticos ao enviado.
+- **Análise automática de ponta a ponta**: um DARF de teste com 862 caracteres
+  de texto foi extraído pelo Docling (`extractor: docling`, 882 caracteres),
+  julgado pelo Jev (`model: jev-1.13.0`) e composto pelo `Decide` em seis
+  sinais tipados, concluindo em menos de 6 segundos. O veredito foi `rejected`
+  com confiança 0,98, e estava **correto**: o arquivo não correspondia ao
+  documento pedido no item. O item permaneceu `uploaded`, porque o escritório
+  está em `suggest` e só `auto` aplica veredito sozinho.
 
 Sem validação:
 
 - **E-mail não sai** — `SMTP_HOST` é placeholder, por decisão de quem operou o
   deploy. As entregas ficam registradas como falha.
-- Análise automática desligada; `docling` não foi criado.
 - Domínio próprio, Playwright e validação visual seguem pendentes, como
   registra `docs/06-validacao-da-entrega.md`.
 
