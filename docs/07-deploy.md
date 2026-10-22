@@ -161,12 +161,18 @@ S3_ACCEPT_UNCONFIRMED_ENCRYPTION=true         # ver "Os arquivos"
 
 CLAMAV_ADDRESS=clamav.railway.internal:3310
 
-SMTP_HOST=...
-SMTP_PORT=587
-SMTP_FROM=nao-responda@<dominio>
-SMTP_USERNAME=...
-SMTP_PASSWORD=...
-SMTP_REQUIRE_TLS=true
+# E-mail. Na Railway abaixo do plano Pro o SMTP de saída é bloqueado e a
+# conexão expira sem erro do provedor -- veja "O e-mail não sai por SMTP".
+RESEND_API_KEY=re_...
+MAIL_FROM=nao-responda@<dominio>            # domínio verificado no provedor
+
+# Alternativa, onde a porta de SMTP não for bloqueada:
+# SMTP_HOST=...
+# SMTP_PORT=587
+# SMTP_FROM=nao-responda@<dominio>
+# SMTP_USERNAME=...
+# SMTP_PASSWORD=...
+# SMTP_REQUIRE_TLS=true
 
 # Assinaturas -- a API recusa subir com a chave e sem o resto
 STRIPE_SECRET_KEY=sk_live_...                 # produção recusa sk_test/rk_test
@@ -313,6 +319,37 @@ O bucket do R2 tinha um domínio `pub-*.r2.dev` ativo. Objeto em bucket deste
 app nunca deve ser público: o download passa por `GET /api/files/{id}`
 justamente para ser autorizado, e as chaves (`orgID/requestID/fileID`) são
 aleatórias mas não são controle de acesso.
+
+## O e-mail não sai por SMTP
+
+A Railway bloqueia SMTP de saída em todo plano abaixo de Pro. O sintoma não é
+um erro do provedor: a conexão simplesmente expira.
+
+```
+smtp implicit TLS dial failed (smtp.hostinger.com:465, mode implicit):
+dial tcp 172.65.255.143:465: i/o timeout
+```
+
+Verificado em 22/10/2026: as portas 465 e 587 da Hostinger respondem em TLS 1.3
+com certificado válido a partir de uma máquina comum, e expiram a partir do
+container. A configuração estava correta; ela só não alcançava a rede. A
+documentação da Railway diz o mesmo em uma linha: *"SMTP is only available on
+the Pro plan and above."*
+
+Por isso o envio tem dois transportes. Com `RESEND_API_KEY` a mensagem sai por
+HTTPS, pelo mesmo caminho de qualquer outra chamada de API do binário, e o
+bloqueio deixa de existir. O SMTP continua para o Compose local, onde o Mailpit
+é justamente o ponto. `MAIL_FROM` é o remetente dos dois; sem ele vale
+`SMTP_FROM`, para um deploy anterior continuar igual.
+
+Antes da primeira mensagem, o domínio do remetente precisa estar verificado no
+provedor: são registros de SPF e DKIM no DNS de `docping.com.br`, que fica na
+Hostinger. Sem isso o provedor recusa com `validation_error`, e o log registra
+a frase dele.
+
+**Isto bloqueia o produto inteiro quando falha**, não só o cadastro:
+confirmação de e-mail, link do portal para o cliente e lembrete de prazo saem
+todos pelo mesmo caminho.
 
 ## A Stripe
 

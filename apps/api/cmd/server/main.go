@@ -4,6 +4,7 @@ import (
 	"context"
 	"docping/api/internal/app"
 	"docping/api/internal/billing"
+	"docping/api/internal/mailer"
 	"docping/api/internal/persistence"
 	"docping/api/internal/storage"
 	"log"
@@ -38,6 +39,10 @@ func main() {
 		log.Print("WARNING: S3_ACCEPT_UNCONFIRMED_ENCRYPTION is on -- an uploaded file is kept even when the provider does not confirm SSE-S3; encryption at rest is trusted, not verified")
 	}
 	application := &app.App{Config: config, Store: store, Objects: objects}
+	if config.ResendKey != "" {
+		application.Mail = mailer.New(config.ResendKey)
+	}
+	log.Printf("e-mail sai por %s, remetente %s", config.MailTransport(), config.Sender())
 	if config.Billing() {
 		application.Stripe = billing.New(config.StripeKey)
 	} else {

@@ -38,6 +38,15 @@ type Config struct {
 	DemoTTL, UnverifiedTTL time.Duration
 	DemoMaxActive          int
 	DemoRateHourly         int
+	// ResendKey turns on sending over HTTPS instead of SMTP. It exists
+	// because SMTP is not always reachable: a platform that blocks the port
+	// makes it time out silently, and a product whose only transport is SMTP
+	// then cannot tell a customer anything. When set, it wins over SMTP.
+	ResendKey string
+	// MailFrom overrides the sender for either transport. Read it through
+	// Sender(), which falls back to SMTPFrom so a deployment configured
+	// before this field existed keeps working unchanged.
+	MailFrom string
 	// Billing. StripeKey being set is what turns subscriptions on: a
 	// deployment without it behaves exactly as the product did before money
 	// existed, which is what keeps a development machine and the test suite
@@ -233,7 +242,7 @@ func LoadConfig() (Config, error) {
 	unverifiedHours, _ := strconv.Atoi(env("UNVERIFIED_TTL_HOURS", "168"))
 	demoMax, _ := strconv.Atoi(env("DEMO_MAX_ACTIVE", "200"))
 	demoRate, _ := strconv.Atoi(env("DEMO_RATE_PER_HOUR", "3"))
-	c := Config{Env: env("APP_ENV", "production"), Port: env("PORT", "8080"), Origin: env("WEB_ORIGIN", env("FRONTEND_URL", "http://localhost:5173")), Driver: env("STORE_DRIVER", "mysql"), DSN: env("MYSQL_DSN", os.Getenv("DATABASE_DSN")), MySQLCACert: os.Getenv("MYSQL_CA_CERT"), DataDir: env("DATA_DIR", ".data"), S3Endpoint: os.Getenv("S3_ENDPOINT"), S3Bucket: env("S3_BUCKET", "docping"), S3Access: os.Getenv("S3_ACCESS_KEY"), S3Secret: os.Getenv("S3_SECRET_KEY"), Scanner: os.Getenv("CLAMAV_ADDRESS"), AllowUnscanned: os.Getenv("ALLOW_UNSCANNED_UPLOADS") == "true", S3AcceptUnconfirmedEncryption: os.Getenv("S3_ACCEPT_UNCONFIRMED_ENCRYPTION") == "true", SMTPHost: os.Getenv("SMTP_HOST"), SMTPPort: env("SMTP_PORT", "1025"), SMTPFrom: os.Getenv("SMTP_FROM"), SMTPUser: os.Getenv("SMTP_USERNAME"), SMTPPass: os.Getenv("SMTP_PASSWORD"), SMTPRequireTLS: env("SMTP_REQUIRE_TLS", "true") == "true", SMTPTLSMode: resolveSMTPTLSMode(os.Getenv("SMTP_TLS_MODE"), env("SMTP_PORT", "1025")), MaxUpload: maxBytes, MaxOrgBytes: orgBytes, MaxRequestBytes: requestBytes, ClientLimit: limit, Location: loc, AIReview: os.Getenv("AI_REVIEW_ENABLED") == "true", DoclingURL: os.Getenv("DOCLING_URL"), DoclingKey: os.Getenv("DOCLING_API_KEY"), DoclingLang: env("DOCLING_OCR_LANG", "pt"), PaddleURL: os.Getenv("PADDLEOCR_URL"), JevURL: env("TYPESAFE_API_URL", "https://api.typesafe.ai"), JevKey: os.Getenv("TYPESAFE_API_KEY"), JevModel: env("TYPESAFE_MODEL", "jev-latest"), AIMaxChars: aiChars, AIApprove: aiApprove, AIReject: aiReject, DemoTTL: time.Duration(demoHours) * time.Hour, UnverifiedTTL: time.Duration(unverifiedHours) * time.Hour, DemoMaxActive: demoMax, DemoRateHourly: demoRate, StripeKey: strings.TrimSpace(os.Getenv("STRIPE_SECRET_KEY")), StripeWebhookSecret: strings.TrimSpace(os.Getenv("STRIPE_WEBHOOK_SECRET")), Prices: prices}
+	c := Config{Env: env("APP_ENV", "production"), Port: env("PORT", "8080"), Origin: env("WEB_ORIGIN", env("FRONTEND_URL", "http://localhost:5173")), Driver: env("STORE_DRIVER", "mysql"), DSN: env("MYSQL_DSN", os.Getenv("DATABASE_DSN")), MySQLCACert: os.Getenv("MYSQL_CA_CERT"), DataDir: env("DATA_DIR", ".data"), S3Endpoint: os.Getenv("S3_ENDPOINT"), S3Bucket: env("S3_BUCKET", "docping"), S3Access: os.Getenv("S3_ACCESS_KEY"), S3Secret: os.Getenv("S3_SECRET_KEY"), Scanner: os.Getenv("CLAMAV_ADDRESS"), AllowUnscanned: os.Getenv("ALLOW_UNSCANNED_UPLOADS") == "true", S3AcceptUnconfirmedEncryption: os.Getenv("S3_ACCEPT_UNCONFIRMED_ENCRYPTION") == "true", SMTPHost: os.Getenv("SMTP_HOST"), SMTPPort: env("SMTP_PORT", "1025"), SMTPFrom: os.Getenv("SMTP_FROM"), SMTPUser: os.Getenv("SMTP_USERNAME"), SMTPPass: os.Getenv("SMTP_PASSWORD"), SMTPRequireTLS: env("SMTP_REQUIRE_TLS", "true") == "true", SMTPTLSMode: resolveSMTPTLSMode(os.Getenv("SMTP_TLS_MODE"), env("SMTP_PORT", "1025")), MaxUpload: maxBytes, MaxOrgBytes: orgBytes, MaxRequestBytes: requestBytes, ClientLimit: limit, Location: loc, AIReview: os.Getenv("AI_REVIEW_ENABLED") == "true", DoclingURL: os.Getenv("DOCLING_URL"), DoclingKey: os.Getenv("DOCLING_API_KEY"), DoclingLang: env("DOCLING_OCR_LANG", "pt"), PaddleURL: os.Getenv("PADDLEOCR_URL"), JevURL: env("TYPESAFE_API_URL", "https://api.typesafe.ai"), JevKey: os.Getenv("TYPESAFE_API_KEY"), JevModel: env("TYPESAFE_MODEL", "jev-latest"), AIMaxChars: aiChars, AIApprove: aiApprove, AIReject: aiReject, DemoTTL: time.Duration(demoHours) * time.Hour, UnverifiedTTL: time.Duration(unverifiedHours) * time.Hour, DemoMaxActive: demoMax, ResendKey: strings.TrimSpace(os.Getenv("RESEND_API_KEY")), MailFrom: strings.TrimSpace(os.Getenv("MAIL_FROM")), DemoRateHourly: demoRate, StripeKey: strings.TrimSpace(os.Getenv("STRIPE_SECRET_KEY")), StripeWebhookSecret: strings.TrimSpace(os.Getenv("STRIPE_WEBHOOK_SECRET")), Prices: prices}
 	if c.Env != "development" && c.Env != "production" && c.Env != "test" {
 		return c, errors.New("APP_ENV must be development or production")
 	}
@@ -250,8 +259,11 @@ func LoadConfig() (Config, error) {
 			return c, e
 		}
 	}
-	if c.Env == "production" && (c.Driver != "mysql" || c.DSN == "" || c.S3Endpoint == "" || c.Scanner == "" || c.AllowUnscanned || c.SMTPHost == "" || c.SMTPFrom == "" || !c.SMTPRequireTLS) {
-		return c, errors.New("production requires HTTPS WEB_ORIGIN, MySQL, private S3, ClamAV and TLS SMTP; development bypasses are forbidden")
+	// The mail rule is about having a way to send, not about which one: an
+	// HTTPS provider satisfies it on its own, and SMTP still has to be TLS
+	// when SMTP is the path being used.
+	if c.Env == "production" && (c.Driver != "mysql" || c.DSN == "" || c.S3Endpoint == "" || c.Scanner == "" || c.AllowUnscanned || !c.CanSendEmail() || c.SMTPHost != "" && !c.SMTPRequireTLS) {
+		return c, errors.New("production requires HTTPS WEB_ORIGIN, MySQL, private S3, ClamAV and a way to send e-mail (RESEND_API_KEY, or SMTP with TLS); development bypasses are forbidden")
 	}
 	if c.Env == "production" {
 		for _, origin := range c.Origins {
@@ -286,16 +298,16 @@ func LoadConfig() (Config, error) {
 	if c.DemoTTL < time.Hour || c.DemoTTL > 720*time.Hour || c.UnverifiedTTL < time.Hour || c.UnverifiedTTL > 8760*time.Hour || c.DemoMaxActive < 1 || c.DemoRateHourly < 1 || c.DemoRateHourly > 600 {
 		return c, errors.New("DEMO_TTL_HOURS 1-720, UNVERIFIED_TTL_HOURS 1-8760, DEMO_MAX_ACTIVE and DEMO_RATE_PER_HOUR must be positive")
 	}
-	// An unconfirmed registration is only worth gating when there is a way to
-	// send the confirmation. Production is already required to have SMTP
-	// above, so this is on wherever it can be, and off only on a development
-	// machine with no mail server.
 	if err := c.checkBilling(); err != nil {
 		return c, err
 	}
-	c.VerifyEmail = c.SMTPHost != "" && c.SMTPFrom != ""
+	// An unconfirmed registration is only worth gating when there is a way to
+	// send the confirmation, by either transport. Production is already
+	// required to have one above, so this is on wherever it can be, and off
+	// only on a development machine with no way to send at all.
+	c.VerifyEmail = c.CanSendEmail()
 	if c.Env == "production" && !c.VerifyEmail {
-		return c, errors.New("production requires SMTP so new accounts can confirm their e-mail")
+		return c, errors.New("production requires a way to send e-mail so new accounts can confirm their address")
 	}
 	return c, nil
 }
@@ -443,4 +455,32 @@ func (c Config) checkBilling() error {
 		}
 	}
 	return nil
+}
+
+// Sender is the address messages go out as. MAIL_FROM names it; SMTP_FROM is
+// what named it before a second transport existed, and still does when the
+// newer name is absent.
+func (c Config) Sender() string {
+	if c.MailFrom != "" {
+		return c.MailFrom
+	}
+	return c.SMTPFrom
+}
+
+// CanSendEmail answers whether this deployment has any way to deliver a
+// message. Both transports need a sender; neither can invent one.
+func (c Config) CanSendEmail() bool {
+	return c.Sender() != "" && (c.ResendKey != "" || c.SMTPHost != "")
+}
+
+// MailTransport names the path a message takes, for the start-up log. Which
+// one is in use is the first thing to know when a message does not arrive.
+func (c Config) MailTransport() string {
+	switch {
+	case c.ResendKey != "":
+		return "resend (https)"
+	case c.SMTPHost != "":
+		return "smtp " + net.JoinHostPort(c.SMTPHost, c.SMTPPort) + " (" + c.SMTPTLSMode + ")"
+	}
+	return "none"
 }

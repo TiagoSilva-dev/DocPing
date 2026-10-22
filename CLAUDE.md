@@ -158,7 +158,13 @@ amount of state in a store that loads all of it per transaction.
 
 `internal/app/config.go` refuses to start when `APP_ENV=production` lacks HTTPS origin,
 verified-TLS MySQL, private S3, ClamAV or TLS SMTP, or when any development bypass is
-set. `SMTP_TLS_MODE` picks how the mail connection reaches TLS — `starttls` (port 587)
+set. Mail has two transports and production needs one of them, not a specific one:
+`RESEND_API_KEY` sends over HTTPS and wins when set, SMTP stays for the local
+Mailpit stack, and `Config.Sender()` resolves `MAIL_FROM` falling back to
+`SMTP_FROM`. HTTPS exists because a platform can block the SMTP port outright —
+Railway does below Pro, and the dial just times out — so a product whose only
+transport is SMTP can go silent without a single error from the provider.
+`SMTP_TLS_MODE` picks how the mail connection reaches TLS — `starttls` (port 587)
 or `implicit` (port 465, TLS before the greeting, which is what Hostinger recommends);
 blank means the port decides. Both verify the certificate against the system roots and
 the configured hostname, and an unknown mode is refused rather than treated as

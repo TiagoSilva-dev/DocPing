@@ -46,13 +46,32 @@ func (a *App) smtpFailure(stage, friendly string, err error) error {
 	return errors.New(friendly)
 }
 
+// sendEmail delivers one message by whichever transport this deployment has.
+// HTTPS wins when it is configured: it is the one that works everywhere,
+// including on a platform that blocks the SMTP port outright. SMTP stays for
+// the local stack, where Mailpit is the whole point.
 func (a *App) sendEmail(to, subject, body string) error {
-	if a.Config.SMTPHost == "" || a.Config.SMTPFrom == "" {
+	if !a.Config.CanSendEmail() {
 		return errors.New("e-mail não configurado")
 	}
-	if !validEmail(to) || !validEmail(a.Config.SMTPFrom) || strings.ContainsAny(subject, "\r\n") {
+	if !validEmail(to) || !validEmail(a.Config.Sender()) || strings.ContainsAny(subject, "\r\n") {
 		return errors.New("destinatário inválido")
 	}
+	if a.Mail != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := a.Mail.Send(ctx, a.Config.Sender(), to, subject, body); err != nil {
+			// The provider's own words go to the log; the customer and the
+			// delivery record get the sentence they can act on.
+			log.Printf("resend send failed (from %s): %v", a.Config.Sender(), err)
+			return errors.New("provedor de e-mail recusou a mensagem")
+		}
+		return nil
+	}
+	return a.sendSMTP(to, subject, body)
+}
+
+func (a *App) sendSMTP(to, subject, body string) error {
 	addr := net.JoinHostPort(a.Config.SMTPHost, a.Config.SMTPPort)
 	implicit := a.Config.SMTPTLSMode == smtpTLSImplicit
 	var conn net.Conn
@@ -88,7 +107,7 @@ func (a *App) sendEmail(to, subject, body string) error {
 			return a.smtpFailure("auth", "autenticação do provedor de e-mail falhou", err)
 		}
 	}
-	if err = client.Mail(a.Config.SMTPFrom); err != nil {
+	if err = client.Mail(a.Config.Sender()); err != nil {
 		return a.smtpFailure("sender", "remetente recusado pelo provedor", err)
 	}
 	if err = client.Rcpt(to); err != nil {
@@ -98,7 +117,7 @@ func (a *App) sendEmail(to, subject, body string) error {
 	if err != nil {
 		return a.smtpFailure("data", "provedor recusou a mensagem", err)
 	}
-	message := "From: " + a.Config.SMTPFrom + "\r\nTo: " + to + "\r\nSubject: " + mime.QEncoding.Encode("utf-8", subject) + "\r\nDate: " + time.Now().Format(time.RFC1123Z) + "\r\nMessage-ID: <" + domain.ID() + "@" + messageIDDomain(a.Config.SMTPFrom) + ">\r\nAuto-Submitted: auto-generated\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n" + body + "\r\n"
+	message := "From: " + a.Config.Sender() + "\r\nTo: " + to + "\r\nSubject: " + mime.QEncoding.Encode("utf-8", subject) + "\r\nDate: " + time.Now().Format(time.RFC1123Z) + "\r\nMessage-ID: <" + domain.ID() + "@" + messageIDDomain(a.Config.Sender()) + ">\r\nAuto-Submitted: auto-generated\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n" + body + "\r\n"
 	if _, err = data.Write([]byte(message)); err != nil {
 		return a.smtpFailure("write", "falha no envio ao provedor", err)
 	}

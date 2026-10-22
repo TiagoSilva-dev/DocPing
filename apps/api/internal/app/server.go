@@ -7,6 +7,7 @@ import (
 	"docping/api/internal/analysis"
 	"docping/api/internal/billing"
 	"docping/api/internal/domain"
+	"docping/api/internal/mailer"
 	"docping/api/internal/persistence"
 	"docping/api/internal/storage"
 	"encoding/hex"
@@ -29,6 +30,9 @@ type App struct {
 	// an unconfigured deployment behaves exactly as it did before.
 	Analyzer     *analysis.Analyzer
 	analysisJobs chan analysisJob
+	// Mail is nil unless RESEND_API_KEY is set, and then it is the transport
+	// sendEmail uses instead of SMTP.
+	Mail *mailer.Resend
 	// Stripe is nil unless STRIPE_SECRET_KEY is set. Every billing route
 	// checks Config.Billing() before touching it, so a deployment without a
 	// key never reaches a nil client.
