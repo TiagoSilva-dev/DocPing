@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 import { Button, Logo } from "@/components/shared";
 import { post } from "@/lib/api";
+import { PLANS as plans } from "@/lib/plans";
 import {
   faqPageLd,
   softwareApplicationLd,
@@ -88,52 +89,6 @@ const criteria = [
   ["Integridade", "Está completo, sem páginas faltando ou conteúdo cortado."],
   ["Legibilidade", "Dá para ler — inclusive em foto tirada pelo celular."],
   ["Impedimentos", "Documento vencido, rasurado ou com indício de adulteração."],
-];
-
-// Prices are a proposal, not an enforced entitlement: today only ClientLimit
-// is stored per organization, so the request and storage figures below are not
-// yet checked anywhere in the API. Wire the limits before charging.
-const plans = [
-  {
-    name: "Essencial",
-    price: "97",
-    unit: "R$ 6,47 por solicitação ativa",
-    pitch: "Para o escritório que está organizando a coleta pela primeira vez.",
-    featured: false,
-    items: [
-      "15 solicitações ativas",
-      "5 GB de armazenamento",
-      "Análise automática incluída",
-      "Modelos e recorrências",
-    ],
-  },
-  {
-    name: "Escritório",
-    price: "237",
-    unit: "R$ 3,65 por solicitação ativa",
-    pitch: "Para a rotina de fechamento com uma carteira inteira todo mês.",
-    featured: true,
-    items: [
-      "65 solicitações ativas",
-      "30 GB de armazenamento",
-      "Análise automática incluída",
-      "Equipe do mesmo domínio",
-      "Sua marca no portal do cliente",
-    ],
-  },
-  {
-    name: "Rede",
-    price: "487",
-    unit: "R$ 2,44 por solicitação ativa",
-    pitch: "Para quem atende centenas de empresas e não pode perder prazo.",
-    featured: false,
-    items: [
-      "200 solicitações ativas",
-      "120 GB de armazenamento",
-      "Análise automática incluída",
-      "Tudo do plano Escritório",
-    ],
-  },
 ];
 
 const comparison = [
@@ -704,7 +659,7 @@ export function Landing() {
             {plans.map((plan) => (
               <article
                 className={`lp-plan${plan.featured ? " lp-plan-featured" : ""}`}
-                key={plan.name}
+                key={plan.id}
               >
                 {plan.featured && (
                   <span className="lp-plan-tag">Mais escolhido</span>
@@ -737,9 +692,10 @@ export function Landing() {
           </div>
           <p className="lp-plan-note">
             Quer conhecer antes de assinar? A demonstração abre na hora, com
-            dados fictícios e sem cadastro. No plano anual, dois meses por
-            nossa conta. Escritórios do piloto fundador mantêm o preço de
-            entrada enquanto forem clientes.
+            dados fictícios e sem cadastro. Todos os planos são mensais, sem
+            fidelidade, e o cancelamento é feito por você a qualquer momento.
+            Escritórios do piloto fundador mantêm o preço de entrada enquanto
+            forem clientes.
           </p>
         </section>
         <section className="lp-faq lp-container">

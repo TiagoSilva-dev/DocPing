@@ -25,7 +25,8 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { api, post, put } from "@/lib/api";
+import { api, openBillingPortal, post, put } from "@/lib/api";
+import { planName, subscriptionLabel } from "@/lib/plans";
 import { usePageMeta } from "@/lib/seo";
 import type {
   Client,
@@ -2015,6 +2016,9 @@ export function SettingsPage() {
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [billingPending, setBillingPending] = useState(false);
+  const [billingError, setBillingError] = useState("");
+  const billing = session.billing;
   const queryClient = useQueryClient();
   const toast = useToast();
   useEffect(() => {
@@ -2256,6 +2260,90 @@ export function SettingsPage() {
               </select>
             </Field>
           </section>
+          {billing?.enabled && (
+            <section className="panel wp-settings-section">
+              <div className="wp-settings-section-title">
+                <span className="wp-section-number mono">05</span>
+                <div>
+                  <h2>Plano e cobrança</h2>
+                  <p>
+                    O pagamento é processado pela Stripe. Trocar de plano,
+                    mudar o cartão ou cancelar acontece na área de cobrança
+                    dela.
+                  </p>
+                </div>
+              </div>
+              <dl className="wp-billing-facts">
+                <div>
+                  <dt>Plano</dt>
+                  <dd>{planName(billing.plan)}</dd>
+                </div>
+                <div>
+                  <dt>Assinatura</dt>
+                  <dd>
+                    <span
+                      className={`wp-billing-dot wp-billing-dot-${billing.entitled ? "ok" : "off"}`}
+                      aria-hidden
+                    />
+                    {subscriptionLabel(billing.status)}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Solicitações ativas</dt>
+                  <dd>
+                    {billing.activeRequests}
+                    {billing.limits.activeRequests > 0
+                      ? ` de ${billing.limits.activeRequests}`
+                      : ""}
+                  </dd>
+                </div>
+                {billing.periodEnd && (
+                  <div>
+                    <dt>
+                      {billing.cancelAtPeriodEnd ? "Encerra em" : "Renova em"}
+                    </dt>
+                    <dd>{dateLabel(billing.periodEnd)}</dd>
+                  </div>
+                )}
+              </dl>
+              {billing.cancelAtPeriodEnd && (
+                <p className="wp-billing-note" role="status">
+                  A assinatura está marcada para não renovar. O escritório
+                  continua funcionando até o fim do período pago.
+                </p>
+              )}
+              {billingError && (
+                <p className="inline-error" role="alert">
+                  {billingError}
+                </p>
+              )}
+              <div className="wp-billing-actions">
+                {billing.manageable ? (
+                  <Button
+                    type="button"
+                    loading={billingPending}
+                    onClick={async () => {
+                      setBillingError("");
+                      setBillingPending(true);
+                      try {
+                        const { url } = await openBillingPortal();
+                        window.location.assign(url);
+                      } catch (err) {
+                        setBillingError(message(err));
+                        setBillingPending(false);
+                      }
+                    }}
+                  >
+                    Abrir área de cobrança
+                  </Button>
+                ) : (
+                  <Link to="/assinar">
+                    <Button type="button">Escolher um plano</Button>
+                  </Link>
+                )}
+              </div>
+            </section>
+          )}
           {error && (
             <p className="inline-error" role="alert">
               {error}

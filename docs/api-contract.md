@@ -20,9 +20,17 @@ Rate limiting por IP usa o endereço da conexão. `X-Forwarded-For` só é consi
     "retentionDays": 365, "reminderDays": [3, 6], "remindersEnabled": true,
     "createdAt": "2026-10-20T02:00:00Z"
   },
-  "csrfToken": "..."
+  "csrfToken": "...",
+  "billing": {
+    "enabled": true, "entitled": true, "plan": "escritorio", "status": "active",
+    "periodEnd": "2026-11-22T18:51:00Z", "cancelAtPeriodEnd": false,
+    "manageable": true, "activeRequests": 12,
+    "limits": { "activeRequests": 65, "storageBytes": 32212254720, "clients": 30 }
+  }
 }
 ```
+
+`billing.enabled` é falso onde `STRIPE_SECRET_KEY` não está configurada, e aí `entitled` é sempre verdadeiro: a instalação não cobra e nada é bloqueado. `entitled` é o único campo que decide algo; os limites são para a tela mostrar, nunca para ela aplicar.
 
 - `POST /auth/register`: `{organizationName,name,email,password}`. Senha de 12 a 128 caracteres, Argon2id (64MiB,3 iterações,1 thread), e-mail único. Cria escritório vazio com três modelos iniciais; não cria clientes/documentos de demonstração. **Não devolve sessão:** responde `{status:"verification_sent",email}` e envia o link de confirmação. O escritório só fica acessível depois da confirmação. Sem SMTP configurado — situação possível apenas em desenvolvimento, já que produção exige SMTP — a conta nasce confirmada e a resposta é a sessão, como antes.
 - `POST /auth/verify-email`: `{token}`. Confirma o endereço e abre a sessão, de uso único, válido por 24h. `410 verification_expired` para link usado, expirado, inexistente ou emitido para um e-mail que a conta não usa mais. Link frontend `/confirmar-email?token=...`.
@@ -120,6 +128,24 @@ Aplicar o veredito depende da organização: `auto` move o item (aprova, ou marc
 `GET /audit` registra `analysis.requested`, `analysis.completed`/`analysis.failed` e, quando aplicado, `item.approve`/`item.correct` sem `userId`.
 
 Limites conhecidos: os limiares são ponto de partida e precisam ser calibrados nos documentos do próprio escritório; a fila é em memória e um reinício perde jobs enfileirados (o item permanece `uploaded`, visível para revisão); o veredito é sobre o texto extraído, não sobre a imagem — assinatura, carimbo e adulteração visual não são verificados.
+
+## Assinaturas e planos
+
+Desligado por padrão. Sem `STRIPE_SECRET_KEY` nenhuma rota de cobrança existe, nenhum espaço é bloqueado e o cadastro nasce como `founder_pilot`, exatamente como antes de haver dinheiro.
+
+Com a chave configurada, três planos mensais em BRL são vendidos por Stripe Checkout — `essencial` (R$97), `escritorio` (R$237) e `rede` (R$487) —, cada um ligado ao seu preço por `STRIPE_PRICE_*`. Um escritório criado a partir daí nasce **sem plano** e só abre quando a Stripe confirmar a assinatura.
+
+- `POST /billing/checkout`: `{plan}` → `{url}`. Exige sessão e CSRF. Abre o Checkout hospedado (modo assinatura, locale pt-BR, coleta de CNPJ, cupons habilitados) e responde com a URL da Stripe. `422` para plano que esta instalação não vende, `409 demo_organization` para a demonstração, `409 already_subscribed` para quem já tem assinatura viva, `503 billing_disabled` sem Stripe configurada. Limite de10 por minuto por IP.
+- `POST /billing/portal` → `{url}`. Abre o portal da própria Stripe, onde se troca o cartão, muda de plano e cancela. `409 no_subscription` para quem nunca assinou. Nenhum dado de cartão passa por este produto.
+- `POST /billing/webhook`: entrada da Stripe. **Não** tem sessão, CSRF nem origem — é a única rota assim, e o que a protege é a assinatura `Stripe-Signature`, verificada por HMAC-SHA256 sobre `timestamp.corpo` com tolerância de5 minutos. Falha devolve `400` sem detalhe. Eventos tratados: `checkout.session.completed`, `checkout.session.async_payment_succeeded`, `customer.subscription.created/updated/deleted`, `invoice.paid`, `invoice.payment_failed`, `charge.dispute.created`, `charge.refunded` e `radar.early_fraud_warning.created`. Tipo não tratado é respondido `200` e ignorado; `500` só quando a falha é nossa, porque é o que faz a Stripe reentregar.
+
+O que o webhook grava fica no payload da organização: `subscriptionStatus` (vocabulário da própria Stripe), `stripeCustomerId`, `stripeSubscriptionId`, `currentPeriodEnd`, `cancelAtPeriodEnd` e `billingUpdatedAt`. A organização é encontrada pelo **customer id**, não por metadado; `client_reference_id` é apenas o resgate quando o cliente ainda não foi gravado. Entrega mais antiga que `billingUpdatedAt` é descartada — entregas repetem e chegam fora de ordem, e aplicar uma antiga fecharia um escritório que acabou de pagar. Preço desconhecido grava o status e **não** escolhe plano.
+
+O acesso segue o status: `active`, `trialing` e `past_due` abrem o escritório — a Stripe ainda está tentando o cartão em `past_due`, e cortar ali seria cortar por um atraso de bandeira. `canceled`, `unpaid` e `incomplete` fecham: toda rota autenticada responde `402 subscription_required`, exceto `GET /session`, `GET /organization`, `POST /auth/logout` e as duas rotas de cobrança, que são o que a tela de assinatura precisa. O portal do cliente (token público) continua funcionando: quem envia documento não é quem deixou de pagar. Demonstração e `founder_pilot` nunca são bloqueados.
+
+Disputa, estorno e alerta de fraude gravam `billingAlert` e uma entrada de auditoria, e **não** suspendem ninguém: documento de cliente no meio de um fechamento não é garantia de cobrança.
+
+Os limites do plano são aplicados pelo servidor, não só anunciados: solicitações **ativas** ao mesmo tempo (15/65/200 — concluída ou cancelada libera a vaga) e armazenamento (5/30/120 GB, sempre dentro do teto da instalação). `422 plan_limit` recusa o lote inteiro quando ele cruzaria a linha, e a recorrência para de criar no limite em vez de ser o caminho que o contorna. `founder_pilot` e `demo` não têm números próprios: valem os limites da instalação, como antes.
 
 ## Persistência e limites desta entrega
 

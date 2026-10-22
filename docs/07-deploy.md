@@ -168,6 +168,13 @@ SMTP_USERNAME=...
 SMTP_PASSWORD=...
 SMTP_REQUIRE_TLS=true
 
+# Assinaturas -- a API recusa subir com a chave e sem o resto
+STRIPE_SECRET_KEY=sk_live_...                 # produção recusa sk_test/rk_test
+STRIPE_WEBHOOK_SECRET=whsec_...               # do endpoint, não da conta
+STRIPE_PRICE_ESSENCIAL=price_...
+STRIPE_PRICE_ESCRITORIO=price_...
+STRIPE_PRICE_REDE=price_...
+
 # Análise automática — a API recusa subir se ligado e incompleto
 AI_REVIEW_ENABLED=true
 DOCLING_URL=http://docling.railway.internal:5001
@@ -307,6 +314,32 @@ app nunca deve ser público: o download passa por `GET /api/files/{id}`
 justamente para ser autorizado, e as chaves (`orgID/requestID/fileID`) são
 aleatórias mas não são controle de acesso.
 
+## A Stripe
+
+Três coisas precisam existir na conta antes de a cobrança funcionar, e duas
+delas não têm como ser inferidas pelo código:
+
+1. **Um produto por plano**, cada um com seu preço mensal em BRL. Preços de
+   planos diferentes no mesmo produto fazem toda linha de fatura e de Checkout
+   sair com o mesmo nome, e o cliente não distingue o que comprou.
+2. **O endpoint de webhook**, apontando para `https://<domínio>/api/billing/webhook`,
+   com os dez eventos que o `applyEvent` trata. O segredo de assinatura
+   (`whsec_...`) aparece uma única vez, na criação, e é ele que vai em
+   `STRIPE_WEBHOOK_SECRET` — é específico do endpoint, não da conta.
+3. **Uma configuração do portal do cliente**, senão `POST /v1/billing_portal/sessions`
+   recusa e o botão "área de cobrança" não abre. É onde o assinante troca o
+   cartão, muda de plano e cancela; nada disso é reconstruído aqui.
+
+Sem assinatura de webhook verificada, qualquer um que alcance a rota assina de
+graça. É por isso que `LoadConfig` recusa subir com chave e sem segredo, em vez
+de aceitar e registrar um aviso.
+
+**Imposto.** `automatic_tax` **não** está ligado, e ligar não basta: a Stripe
+não calcula nem recolhe nada enquanto não houver registro fiscal ativo na
+conta, e não devolve erro dizendo isso. Enquanto não houver essa decisão, o
+preço cobrado é o preço anunciado, sem imposto somado no Checkout. A coleta de
+CNPJ está ligada, o que cobre a nota do cliente PJ, não a apuração.
+
 ## Ordem de criação
 
 1. Bucket privado. Confirmando SSE-S3 (AWS S3, Backblaze B2), nada mais é
@@ -322,7 +355,8 @@ aleatórias mas não são controle de acesso.
    variáveis acima e o `MYSQL_CA_CERT` do passo 4. Sem domínio público.
 7. Serviço `web`, diretório raiz `/`, Dockerfile `apps/web/Dockerfile`, com
    `API_UPSTREAM` apontando para o `api`.
-8. Domínio no `web`, e só então `WEB_ORIGIN` com esse domínio.
+8. Domínio no `web`, e só então `WEB_ORIGIN` com esse domínio. O webhook da
+   Stripe aponta para esse mesmo domínio, então ele precisa existir antes.
 9. Migrações: são embutidas e aplicadas sozinhas no start da API.
 
 Com IA, acrescente o `docling` e só então ligue `AI_REVIEW_ENABLED=true`.

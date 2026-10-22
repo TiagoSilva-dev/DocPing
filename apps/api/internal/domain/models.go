@@ -30,6 +30,33 @@ type Organization struct {
 	ReminderDays     []int  `json:"reminderDays"`
 	RemindersEnabled bool   `json:"remindersEnabled"`
 	CreatedAt        string `json:"createdAt"`
+	// Billing. These live in the stored payload, never in a column: the
+	// migration list runs on every boot and MySQL has no ADD COLUMN IF NOT
+	// EXISTS, so an evolving field belongs in the JSON aggregate.
+	//
+	// SubscriptionStatus is Stripe's own vocabulary, copied verbatim
+	// (active, trialing, past_due, canceled, unpaid, incomplete...), because
+	// translating it here would only hide what the provider actually said.
+	// The empty value means this workspace never subscribed.
+	SubscriptionStatus string `json:"subscriptionStatus,omitempty"`
+	StripeCustomerID   string `json:"stripeCustomerId,omitempty"`
+	SubscriptionID     string `json:"stripeSubscriptionId,omitempty"`
+	// PeriodEnd is when the paid period runs out, UTC RFC3339. It is what the
+	// workspace shows; it is never what grants access — the status is.
+	PeriodEnd string `json:"currentPeriodEnd,omitempty"`
+	// CancelAtPeriodEnd marks a subscription that Stripe will not renew. The
+	// workspace keeps working until PeriodEnd, so this is a notice, not a lock.
+	CancelAtPeriodEnd bool `json:"cancelAtPeriodEnd,omitempty"`
+	// BillingUpdatedAt is the Stripe event timestamp that produced the state
+	// above, as RFC3339. Webhook deliveries arrive out of order and repeat, so
+	// an event older than this one is ignored instead of overwriting newer
+	// truth with stale truth.
+	BillingUpdatedAt string `json:"billingUpdatedAt,omitempty"`
+	// BillingAlert records a dispute, a refund or an early fraud warning so a
+	// person can look. It never suspends the workspace by itself: money
+	// disputed is a conversation, not a reason to lock an accountant out of a
+	// client's documents mid-closing.
+	BillingAlert string `json:"billingAlert,omitempty"`
 }
 type User struct {
 	ID           string `json:"id"`
@@ -269,6 +296,86 @@ func NormalizeAIReview(mode string) string {
 	}
 	return AIReviewSuggest
 }
+
+// Plans are the three subscriptions on sale, plus the two kinds of workspace
+// that exist without one. The slug is what the API and the stored payload
+// carry; the Stripe price that maps to it is configuration, because a price is
+// replaced in the dashboard without the code knowing.
+const (
+	PlanEssencial  = "essencial"
+	PlanEscritorio = "escritorio"
+	PlanRede       = "rede"
+	// PlanFounderPilot is every workspace opened before the subscription
+	// existed. They keep the entry terms for as long as they stay, which is
+	// what the landing page promises, so billing never locks them out.
+	PlanFounderPilot = "founder_pilot"
+	PlanDemo         = "demo"
+)
+
+// Entitlement is what a plan actually grants, checked by the server rather
+// than only printed on the pricing page. ActiveRequests and StorageBytes are
+// zero when the plan carries no limit of its own and the deployment-wide
+// ceiling in the configuration applies instead.
+type Entitlement struct {
+	Plan           string
+	ActiveRequests int
+	StorageBytes   int64
+}
+
+const gib = 1 << 30
+
+// entitlements mirrors the figures printed on the pricing page. They are the
+// promise being sold: change one here and change it there in the same commit.
+var entitlements = map[string]Entitlement{
+	PlanEssencial:  {Plan: PlanEssencial, ActiveRequests: 15, StorageBytes: 5 * gib},
+	PlanEscritorio: {Plan: PlanEscritorio, ActiveRequests: 65, StorageBytes: 30 * gib},
+	PlanRede:       {Plan: PlanRede, ActiveRequests: 200, StorageBytes: 120 * gib},
+	// The pilot and the demonstration carry no figures of their own: the
+	// deployment ceiling is their only limit, as it was before billing.
+	PlanFounderPilot: {Plan: PlanFounderPilot},
+	PlanDemo:         {Plan: PlanDemo},
+}
+
+// PlanEntitlement resolves what a stored plan grants. An unknown plan — a slug
+// from a newer version, or a typo — reads as the smallest paid plan rather
+// than as unlimited: the failure mode of a mistake here must cost the customer
+// nothing and never hand out what nobody paid for.
+func PlanEntitlement(plan string) Entitlement {
+	if e, ok := entitlements[plan]; ok {
+		return e
+	}
+	return entitlements[PlanEssencial]
+}
+
+// SubscriptionStatuses that Stripe reports. Only the first three let a
+// workspace keep writing.
+const (
+	SubscriptionActive   = "active"
+	SubscriptionTrialing = "trialing"
+	// SubscriptionPastDue is a payment that failed and is still being retried.
+	// Access continues during the retries, with a warning in the workspace:
+	// Stripe has not given up on the card yet, and neither should the product.
+	SubscriptionPastDue = "past_due"
+)
+
+// Entitled answers whether this organization may still create work. A
+// demonstration and a founder pilot always may — neither ever subscribed, and
+// neither is a paying customer whose payment could lapse. Everyone else needs
+// a subscription Stripe still considers alive.
+func (o Organization) Entitled() bool {
+	if o.Demo || o.Plan == PlanFounderPilot {
+		return true
+	}
+	switch o.SubscriptionStatus {
+	case SubscriptionActive, SubscriptionTrialing, SubscriptionPastDue:
+		return true
+	}
+	return false
+}
+
+// Entitlement is the resolved allowance of this organization's plan.
+func (o Organization) Entitlement() Entitlement { return PlanEntitlement(o.Plan) }
+
 func (s *State) Audit(org, user, action, id string) {
 	a := Audit{ID: ID(), OrgID: org, UserID: user, Action: action, EntityID: id, CreatedAt: Now()}
 	s.Audits[a.ID] = a

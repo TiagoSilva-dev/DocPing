@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"docping/api/internal/analysis"
+	"docping/api/internal/billing"
 	"docping/api/internal/domain"
 	"docping/api/internal/persistence"
 	"docping/api/internal/storage"
@@ -28,6 +29,10 @@ type App struct {
 	// an unconfigured deployment behaves exactly as it did before.
 	Analyzer     *analysis.Analyzer
 	analysisJobs chan analysisJob
+	// Stripe is nil unless STRIPE_SECRET_KEY is set. Every billing route
+	// checks Config.Billing() before touching it, so a deployment without a
+	// key never reaches a nil client.
+	Stripe *billing.Client
 }
 type APIError struct {
 	Status        int
@@ -92,6 +97,12 @@ func (a *App) routes() http.Handler {
 	a.handle(m, "PUT /api/organization", true, true, a.updateOrganization)
 	a.handle(m, "GET /api/notifications", false, true, a.notifications)
 	a.handle(m, "GET /api/audit", false, true, a.audits)
+	// Billing bypasses a.handle for the same reasons upload and export do:
+	// each one talks to Stripe, and an HTTP call to another company must not
+	// hold a database transaction open. The webhook has no session at all.
+	m.HandleFunc("POST /api/billing/checkout", a.checkoutHTTP)
+	m.HandleFunc("POST /api/billing/portal", a.portalHTTP)
+	m.HandleFunc("POST /api/billing/webhook", a.webhookHTTP)
 	m.HandleFunc("GET /api/files/{id}", a.file)
 	m.HandleFunc("GET /api/requests/{id}/export", a.export)
 	m.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, map[string]string{"status": "ok"}) })
@@ -163,6 +174,12 @@ func (a *App) security(next http.Handler) http.Handler {
 		// minute: a prospect needs one, not twenty.
 		if r.URL.Path == "/api/auth/demo" {
 			group, max, window = "demo", a.Config.DemoRateHourly, time.Hour
+		}
+		// Each checkout opens a session on Stripe's side; a browser has no
+		// reason to ask for dozens a minute, and the webhook is excluded
+		// because throttling Stripe only turns a delivery into a retry.
+		if r.URL.Path == "/api/billing/checkout" || r.URL.Path == "/api/billing/portal" {
+			group, max = "billing", 10
 		}
 		if strings.Contains(r.URL.Path, "/portal/") {
 			group, max = "portal", 120
@@ -252,7 +269,29 @@ func (c *call) authenticate(write bool) error {
 	c.User = u
 	c.Session = s
 	c.Org = o
+	// The subscription gate. It sits here rather than in a.handle so that it
+	// covers every authenticated route at once, including the three that
+	// stream outside the transaction pipeline. A deployment without Stripe
+	// configured has no gate at all.
+	if c.A.Config.Billing() && !o.Entitled() && !billingExempt(c.R.URL.Path, write) {
+		return fail(402, "subscription_required", "Assine um plano para usar o DocPing.")
+	}
 	return nil
+}
+
+// billingExempt lists what an unsubscribed workspace may still reach: the
+// session it is signed into, the organization record the subscribe screen
+// reads, the way out, and billing itself. Everything else waits for a plan.
+func billingExempt(path string, write bool) bool {
+	switch path {
+	case "/api/auth/logout", "/api/billing/checkout", "/api/billing/portal":
+		return true
+	case "/api/session", "/api/organization":
+		// Readable, so the subscribe screen can say whose workspace this is
+		// and which plan lapsed. Editing the organization waits for a plan.
+		return !write
+	}
+	return false
 }
 func rEqual(a, b string) bool {
 	if len(a) != len(b) || len(a) == 0 {

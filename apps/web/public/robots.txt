@@ -10,6 +10,7 @@ Disallow: /cadastro
 Disallow: /esqueci-senha
 Disallow: /redefinir-senha
 Disallow: /confirmar-email
+Disallow: /assinar
 Disallow: /api/
 
 Sitemap: https://docping.com.br/sitemap.xml

@@ -49,6 +49,15 @@ export function put<T>(path: string, body: unknown) {
 export function getSession() {
   return api<Session>("/session");
 }
+// Checkout and the billing portal are both hosted by Stripe: the server
+// answers with a URL and the browser leaves. Nothing about a card is ever
+// typed into this application.
+export function startCheckout(plan: string) {
+  return post<{ url: string }>("/billing/checkout", { plan });
+}
+export function openBillingPortal() {
+  return post<{ url: string }>("/billing/portal");
+}
 export function uploadFile(
   token: string,
   itemId: string,

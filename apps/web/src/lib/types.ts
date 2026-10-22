@@ -51,11 +51,27 @@ export interface Organization {
   retentionDays?: number;
   aiReview?: AIReviewMode;
 }
+// BillingState is what the server says this workspace may do. `entitled` is
+// the only field that decides anything: the limits are shown, never enforced,
+// here -- the API refuses what the plan does not allow, whatever the screen
+// believes.
+export interface BillingState {
+  enabled: boolean;
+  entitled: boolean;
+  plan: string;
+  status: string;
+  periodEnd?: string;
+  cancelAtPeriodEnd?: boolean;
+  manageable: boolean;
+  activeRequests: number;
+  limits: { activeRequests: number; storageBytes: number; clients: number };
+}
 export interface Session {
   environment?: string;
   user: { id: string; name: string; email: string };
   organization: Organization;
   csrfToken: string;
+  billing?: BillingState;
 }
 export interface Client {
   id: string;

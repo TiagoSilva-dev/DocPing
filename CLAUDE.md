@@ -171,6 +171,38 @@ extractor URL, with a non-HTTPS TypeSafe endpoint, or with a confidence threshol
 automatic fallback from MySQL to JSON. Preserve this: new capabilities that weaken
 production must be rejected in `LoadConfig`, not defaulted.
 
+### Subscriptions are off until a key exists
+
+`internal/billing` is a leaf like `internal/analysis`: a hand-written Stripe
+client (three POSTs, one GET, one HMAC) with no persistence and no domain
+knowledge. The official SDK is not used — the surface is small and this
+repository builds MinIO from source over supply-chain concern — so the API
+version is pinned in `APIVersion` by hand and `Verify` is the most tested
+function in the package.
+
+- Nothing charges without `STRIPE_SECRET_KEY`: no routes, no gate, and a new
+  workspace is born `founder_pilot`, exactly as before money existed. With a
+  key, `LoadConfig` demands the webhook secret and all three prices, and
+  production refuses a test key.
+- The three billing routes bypass `a.handle` for the reason upload and export
+  do: each one calls Stripe, and an HTTP call to another company must not hold
+  a transaction open. The webhook has no session, no CSRF and no Origin — what
+  protects it is the signature, and nothing else.
+- Access follows Stripe's own status. `active`, `trialing` and `past_due` are
+  open; a failed card is still being retried and is not a reason to lock an
+  office out. The gate lives in `authenticate`, so it covers every
+  authenticated route at once; `billingExempt` lists what the subscribe screen
+  needs. The client portal is never gated — whoever uploads a document is not
+  whoever stopped paying.
+- The webhook finds the organization by Stripe **customer id**, not by
+  metadata, and ignores an event older than `BillingUpdatedAt`: deliveries
+  repeat and arrive out of order, and a stale cancellation would close a
+  workspace that just paid. An unknown price records the status and does not
+  pick a plan.
+- Plan allowances are enforced, not advertised: `domain.entitlements` holds
+  the same figures `apps/web/src/lib/plans.ts` prints. Change one and change
+  the other in the same commit, or the pricing page becomes a brochure again.
+
 ### Domain rules
 
 `internal/domain/models.go` holds the state machine and time rules.

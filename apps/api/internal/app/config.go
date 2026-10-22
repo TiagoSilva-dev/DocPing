@@ -3,6 +3,7 @@ package app
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"docping/api/internal/domain"
 	"errors"
 	"github.com/go-sql-driver/mysql"
 	"net"
@@ -37,6 +38,15 @@ type Config struct {
 	DemoTTL, UnverifiedTTL time.Duration
 	DemoMaxActive          int
 	DemoRateHourly         int
+	// Billing. StripeKey being set is what turns subscriptions on: a
+	// deployment without it behaves exactly as the product did before money
+	// existed, which is what keeps a development machine and the test suite
+	// usable. It is never inferred from APP_ENV.
+	StripeKey, StripeWebhookSecret string
+	// Prices maps a plan slug to the Stripe price that sells it. A price is
+	// replaced in the dashboard without this code knowing, so the mapping is
+	// configuration rather than a constant.
+	Prices map[string]string
 	// VerifyEmail gates login until the registrant confirms the address. It is
 	// derived from SMTP being configured, never set by hand: production always
 	// has SMTP, and a development machine without it must stay usable.
@@ -209,11 +219,21 @@ func LoadConfig() (Config, error) {
 	aiChars, _ := strconv.Atoi(env("AI_MAX_CHARS", "24000"))
 	aiApprove, _ := strconv.ParseFloat(env("AI_APPROVE_CONFIDENCE", "0.70"), 64)
 	aiReject, _ := strconv.ParseFloat(env("AI_REJECT_CONFIDENCE", "0.75"), 64)
+	prices := map[string]string{}
+	for plan, key := range map[string]string{
+		domain.PlanEssencial:  "STRIPE_PRICE_ESSENCIAL",
+		domain.PlanEscritorio: "STRIPE_PRICE_ESCRITORIO",
+		domain.PlanRede:       "STRIPE_PRICE_REDE",
+	} {
+		if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+			prices[plan] = v
+		}
+	}
 	demoHours, _ := strconv.Atoi(env("DEMO_TTL_HOURS", "24"))
 	unverifiedHours, _ := strconv.Atoi(env("UNVERIFIED_TTL_HOURS", "168"))
 	demoMax, _ := strconv.Atoi(env("DEMO_MAX_ACTIVE", "200"))
 	demoRate, _ := strconv.Atoi(env("DEMO_RATE_PER_HOUR", "3"))
-	c := Config{Env: env("APP_ENV", "production"), Port: env("PORT", "8080"), Origin: env("WEB_ORIGIN", env("FRONTEND_URL", "http://localhost:5173")), Driver: env("STORE_DRIVER", "mysql"), DSN: env("MYSQL_DSN", os.Getenv("DATABASE_DSN")), MySQLCACert: os.Getenv("MYSQL_CA_CERT"), DataDir: env("DATA_DIR", ".data"), S3Endpoint: os.Getenv("S3_ENDPOINT"), S3Bucket: env("S3_BUCKET", "docping"), S3Access: os.Getenv("S3_ACCESS_KEY"), S3Secret: os.Getenv("S3_SECRET_KEY"), Scanner: os.Getenv("CLAMAV_ADDRESS"), AllowUnscanned: os.Getenv("ALLOW_UNSCANNED_UPLOADS") == "true", S3AcceptUnconfirmedEncryption: os.Getenv("S3_ACCEPT_UNCONFIRMED_ENCRYPTION") == "true", SMTPHost: os.Getenv("SMTP_HOST"), SMTPPort: env("SMTP_PORT", "1025"), SMTPFrom: os.Getenv("SMTP_FROM"), SMTPUser: os.Getenv("SMTP_USERNAME"), SMTPPass: os.Getenv("SMTP_PASSWORD"), SMTPRequireTLS: env("SMTP_REQUIRE_TLS", "true") == "true", SMTPTLSMode: resolveSMTPTLSMode(os.Getenv("SMTP_TLS_MODE"), env("SMTP_PORT", "1025")), MaxUpload: maxBytes, MaxOrgBytes: orgBytes, MaxRequestBytes: requestBytes, ClientLimit: limit, Location: loc, AIReview: os.Getenv("AI_REVIEW_ENABLED") == "true", DoclingURL: os.Getenv("DOCLING_URL"), DoclingKey: os.Getenv("DOCLING_API_KEY"), DoclingLang: env("DOCLING_OCR_LANG", "pt"), PaddleURL: os.Getenv("PADDLEOCR_URL"), JevURL: env("TYPESAFE_API_URL", "https://api.typesafe.ai"), JevKey: os.Getenv("TYPESAFE_API_KEY"), JevModel: env("TYPESAFE_MODEL", "jev-latest"), AIMaxChars: aiChars, AIApprove: aiApprove, AIReject: aiReject, DemoTTL: time.Duration(demoHours) * time.Hour, UnverifiedTTL: time.Duration(unverifiedHours) * time.Hour, DemoMaxActive: demoMax, DemoRateHourly: demoRate}
+	c := Config{Env: env("APP_ENV", "production"), Port: env("PORT", "8080"), Origin: env("WEB_ORIGIN", env("FRONTEND_URL", "http://localhost:5173")), Driver: env("STORE_DRIVER", "mysql"), DSN: env("MYSQL_DSN", os.Getenv("DATABASE_DSN")), MySQLCACert: os.Getenv("MYSQL_CA_CERT"), DataDir: env("DATA_DIR", ".data"), S3Endpoint: os.Getenv("S3_ENDPOINT"), S3Bucket: env("S3_BUCKET", "docping"), S3Access: os.Getenv("S3_ACCESS_KEY"), S3Secret: os.Getenv("S3_SECRET_KEY"), Scanner: os.Getenv("CLAMAV_ADDRESS"), AllowUnscanned: os.Getenv("ALLOW_UNSCANNED_UPLOADS") == "true", S3AcceptUnconfirmedEncryption: os.Getenv("S3_ACCEPT_UNCONFIRMED_ENCRYPTION") == "true", SMTPHost: os.Getenv("SMTP_HOST"), SMTPPort: env("SMTP_PORT", "1025"), SMTPFrom: os.Getenv("SMTP_FROM"), SMTPUser: os.Getenv("SMTP_USERNAME"), SMTPPass: os.Getenv("SMTP_PASSWORD"), SMTPRequireTLS: env("SMTP_REQUIRE_TLS", "true") == "true", SMTPTLSMode: resolveSMTPTLSMode(os.Getenv("SMTP_TLS_MODE"), env("SMTP_PORT", "1025")), MaxUpload: maxBytes, MaxOrgBytes: orgBytes, MaxRequestBytes: requestBytes, ClientLimit: limit, Location: loc, AIReview: os.Getenv("AI_REVIEW_ENABLED") == "true", DoclingURL: os.Getenv("DOCLING_URL"), DoclingKey: os.Getenv("DOCLING_API_KEY"), DoclingLang: env("DOCLING_OCR_LANG", "pt"), PaddleURL: os.Getenv("PADDLEOCR_URL"), JevURL: env("TYPESAFE_API_URL", "https://api.typesafe.ai"), JevKey: os.Getenv("TYPESAFE_API_KEY"), JevModel: env("TYPESAFE_MODEL", "jev-latest"), AIMaxChars: aiChars, AIApprove: aiApprove, AIReject: aiReject, DemoTTL: time.Duration(demoHours) * time.Hour, UnverifiedTTL: time.Duration(unverifiedHours) * time.Hour, DemoMaxActive: demoMax, DemoRateHourly: demoRate, StripeKey: strings.TrimSpace(os.Getenv("STRIPE_SECRET_KEY")), StripeWebhookSecret: strings.TrimSpace(os.Getenv("STRIPE_WEBHOOK_SECRET")), Prices: prices}
 	if c.Env != "development" && c.Env != "production" && c.Env != "test" {
 		return c, errors.New("APP_ENV must be development or production")
 	}
@@ -270,6 +290,9 @@ func LoadConfig() (Config, error) {
 	// send the confirmation. Production is already required to have SMTP
 	// above, so this is on wherever it can be, and off only on a development
 	// machine with no mail server.
+	if err := c.checkBilling(); err != nil {
+		return c, err
+	}
 	c.VerifyEmail = c.SMTPHost != "" && c.SMTPFrom != ""
 	if c.Env == "production" && !c.VerifyEmail {
 		return c, errors.New("production requires SMTP so new accounts can confirm their e-mail")
@@ -367,4 +390,62 @@ func (c Config) registerMySQLCA() error {
 	// from the DSN, so the hostname is checked against the address actually
 	// dialled rather than one restated here.
 	return mysql.RegisterTLSConfig(mysqlCATLSConfig, &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12})
+}
+
+// Billing is on when a Stripe key is configured. Everything about charging --
+// the gate on a workspace, the checkout route, the webhook -- hangs off this,
+// so a deployment with no key is the product as it was before subscriptions.
+func (c Config) Billing() bool { return c.StripeKey != "" }
+
+// PlanForPrice resolves a Stripe price back to the plan it sells. An unknown
+// price returns an empty slug, and the caller must treat that as a refusal
+// rather than as a default plan: it means money arrived for something this
+// deployment does not sell, and guessing would hand out the wrong allowance.
+func (c Config) PlanForPrice(price string) string {
+	for plan, id := range c.Prices {
+		if id == price {
+			return plan
+		}
+	}
+	return ""
+}
+
+// checkBilling refuses a configuration that would charge, or fail to charge,
+// by halves. The rules exist because each missing piece fails silently and
+// late: an unverified webhook is a forged subscription, a missing price is a
+// checkout that cannot open, and a test key in production is a payment that
+// never happened against a workspace that was let in.
+func (c Config) checkBilling() error {
+	if !c.Billing() {
+		// Without a key the three prices are inert, but a half-configured
+		// deployment is nearly always a mistake worth naming at boot.
+		if len(c.Prices) > 0 || c.StripeWebhookSecret != "" {
+			return errors.New("STRIPE_PRICE_*/STRIPE_WEBHOOK_SECRET set without STRIPE_SECRET_KEY")
+		}
+		return nil
+	}
+	if c.StripeWebhookSecret == "" {
+		return errors.New("STRIPE_WEBHOOK_SECRET is required: without it a subscription could be forged by anyone who can reach the webhook")
+	}
+	for _, plan := range []string{domain.PlanEssencial, domain.PlanEscritorio, domain.PlanRede} {
+		if c.Prices[plan] == "" {
+			return errors.New("STRIPE_PRICE_* missing for plan " + plan)
+		}
+	}
+	seen := map[string]string{}
+	for plan, id := range c.Prices {
+		if other, ok := seen[id]; ok {
+			return errors.New("the same Stripe price sells both " + other + " and " + plan)
+		}
+		seen[id] = plan
+	}
+	if c.Env == "production" {
+		if strings.HasPrefix(c.StripeKey, "sk_test") || strings.HasPrefix(c.StripeKey, "rk_test") {
+			return errors.New("production refuses a Stripe test key: it would open a workspace against a payment that never happened")
+		}
+		if !strings.HasPrefix(c.StripeKey, "sk_live") && !strings.HasPrefix(c.StripeKey, "rk_live") {
+			return errors.New("STRIPE_SECRET_KEY does not look like a live key")
+		}
+	}
+	return nil
 }

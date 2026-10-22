@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -69,6 +70,9 @@ func (a *App) createRequests(c *call) (any, error) {
 	}
 	out := []domain.Request{}
 	seen := map[string]bool{}
+	if err := c.roomForRequests(countDistinct(in.ClientIDs)); err != nil {
+		return nil, err
+	}
 	for _, id := range in.ClientIDs {
 		client, ok := c.S.Clients[id]
 		if !ok || client.OrgID != c.Org.ID || !client.Active {
@@ -495,4 +499,41 @@ func civilDaysBetween(a, b time.Time) int {
 	ay, am, ad := a.Date()
 	by, bm, bd := b.Date()
 	return int(time.Date(by, bm, bd, 0, 0, 0, 0, time.UTC).Sub(time.Date(ay, am, ad, 0, 0, 0, 0, time.UTC)).Hours() / 24)
+}
+
+// activeRequests counts what the plan actually meters: a request that is still
+// being collected. A completed or cancelled one keeps its documents and its
+// history but no longer occupies the allowance -- otherwise the limit would
+// be a lifetime total and every workspace would fill up and stop.
+func activeRequests(s *domain.State, orgID string) int {
+	n := 0
+	for _, r := range s.Requests {
+		if r.OrgID == orgID && r.Status != "completed" && r.Status != "cancelled" {
+			n++
+		}
+	}
+	return n
+}
+
+// roomForRequests refuses the whole batch when it would cross the plan's
+// allowance. It refuses before creating any of them: half a batch of monthly
+// requests is worse than none, because nothing says which clients were left
+// out.
+func (c *call) roomForRequests(wanted int) error {
+	limit := c.Org.Entitlement().ActiveRequests
+	if limit == 0 {
+		return nil
+	}
+	if activeRequests(c.S, c.Org.ID)+wanted > limit {
+		return fail(422, "plan_limit", "Seu plano permite "+strconv.Itoa(limit)+" solicitações ativas ao mesmo tempo. Conclua ou cancele solicitações, ou troque de plano.")
+	}
+	return nil
+}
+
+func countDistinct(ids []string) int {
+	seen := map[string]bool{}
+	for _, id := range ids {
+		seen[id] = true
+	}
+	return len(seen)
 }

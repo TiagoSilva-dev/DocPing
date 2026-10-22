@@ -6,6 +6,7 @@ import (
 	"docping/api/internal/domain"
 	"errors"
 	"fmt"
+	"log"
 	"mime"
 	"net"
 	"net/smtp"
@@ -249,6 +250,17 @@ func (a *App) tick(ctx context.Context, now time.Time) {
 				client, ok := s.Clients[clientID]
 				if !ok || !client.Active || client.OrgID != schedule.OrgID {
 					continue
+				}
+				// The allowance is checked here too, and client by client:
+				// a recurrence that outgrew the plan must stop adding, not
+				// become the one way around the limit. The run is left
+				// unrecorded, so the request appears by itself once the
+				// workspace frees a slot or moves up a plan.
+				if org, ok := s.Organizations[schedule.OrgID]; ok {
+					if limit := org.Entitlement().ActiveRequests; limit > 0 && activeRequests(s, org.ID) >= limit {
+						log.Printf("recurrence %s skipped client %s: organization %s is at its plan limit of %d active requests", id, clientID, org.ID, limit)
+						continue
+					}
 				}
 				r := newRequest(schedule.OrgID, client, t, schedule.Name, competence, execution.AddDate(0, 0, schedule.DueDays).Format("2006-01-02"))
 				r.Sensitive = schedule.Sensitive

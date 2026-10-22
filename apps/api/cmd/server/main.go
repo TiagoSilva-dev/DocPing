@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"docping/api/internal/app"
+	"docping/api/internal/billing"
 	"docping/api/internal/persistence"
 	"docping/api/internal/storage"
 	"log"
@@ -37,6 +38,11 @@ func main() {
 		log.Print("WARNING: S3_ACCEPT_UNCONFIRMED_ENCRYPTION is on -- an uploaded file is kept even when the provider does not confirm SSE-S3; encryption at rest is trusted, not verified")
 	}
 	application := &app.App{Config: config, Store: store, Objects: objects}
+	if config.Billing() {
+		application.Stripe = billing.New(config.StripeKey)
+	} else {
+		log.Print("billing is off: STRIPE_SECRET_KEY is not set, so every workspace keeps the allowance it has")
+	}
 	server := &http.Server{Addr: ":" + config.Port, Handler: application.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 90 * time.Second, WriteTimeout: 120 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20}
 	application.StartAnalysis(ctx)
 	go application.StartWorker(ctx)

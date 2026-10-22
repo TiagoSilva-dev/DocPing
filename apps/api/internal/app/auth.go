@@ -45,7 +45,31 @@ func validEmail(v string) bool {
 	return err == nil && a.Address == v && !strings.ContainsAny(v, "\r\n")
 }
 func (c *call) sessionResponse() any {
-	return map[string]any{"environment": c.A.Config.Env, "user": map[string]string{"id": c.User.ID, "name": c.User.Name, "email": c.User.Email}, "organization": c.Org, "csrfToken": c.Session.CSRF}
+	return map[string]any{"environment": c.A.Config.Env, "user": map[string]string{"id": c.User.ID, "name": c.User.Name, "email": c.User.Email}, "organization": c.Org, "csrfToken": c.Session.CSRF, "billing": c.billingState()}
+}
+
+// billingState is what the workspace needs to decide which screen to show:
+// whether this installation charges at all, whether this organization may
+// work, and the allowance it is working inside. The figures come from the
+// same table the server enforces, so the screen can never promise more than
+// the API will accept.
+func (c *call) billingState() map[string]any {
+	e := c.Org.Entitlement()
+	return map[string]any{
+		"enabled":           c.A.Config.Billing(),
+		"entitled":          !c.A.Config.Billing() || c.Org.Entitled(),
+		"plan":              c.Org.Plan,
+		"status":            c.Org.SubscriptionStatus,
+		"periodEnd":         c.Org.PeriodEnd,
+		"cancelAtPeriodEnd": c.Org.CancelAtPeriodEnd,
+		"manageable":        c.Org.StripeCustomerID != "",
+		"activeRequests":    activeRequests(c.S, c.Org.ID),
+		"limits": map[string]any{
+			"activeRequests": e.ActiveRequests,
+			"storageBytes":   e.StorageBytes,
+			"clients":        c.Org.ClientLimit,
+		},
+	}
 }
 func (a *App) session(c *call) (any, error) { return c.sessionResponse(), nil }
 func (c *call) newSession(u domain.User) any {
@@ -75,7 +99,16 @@ func (a *App) register(c *call) (any, error) {
 			return nil, fail(409, "email_exists", "Este e-mail já possui uma conta.")
 		}
 	}
-	o := domain.Organization{ID: domain.ID(), Name: strings.TrimSpace(input.OrganizationName), ClientLimit: a.Config.ClientLimit, Plan: "founder_pilot", AIReview: domain.AIReviewSuggest, RetentionDays: 365, ReminderDays: []int{3, 6}, RemindersEnabled: true, CreatedAt: domain.Now()}
+	// A workspace opened where billing is on starts with no plan: it is the
+	// subscription that opens it, and the gate in authenticate holds it at
+	// the subscribe screen until Stripe says one exists. Where billing is off
+	// -- a development machine, the test suite -- it starts as the founder
+	// pilot, exactly as every workspace did before money existed.
+	plan := domain.PlanFounderPilot
+	if a.Config.Billing() {
+		plan = ""
+	}
+	o := domain.Organization{ID: domain.ID(), Name: strings.TrimSpace(input.OrganizationName), ClientLimit: a.Config.ClientLimit, Plan: plan, AIReview: domain.AIReviewSuggest, RetentionDays: 365, ReminderDays: []int{3, 6}, RemindersEnabled: true, CreatedAt: domain.Now()}
 	u := domain.User{ID: domain.ID(), OrgID: o.ID, Name: strings.TrimSpace(input.Name), Email: input.Email, StoredHash: passwordHash(input.Password), EmailPending: a.Config.VerifyEmail, CreatedAt: domain.Now()}
 	if !u.EmailPending {
 		u.EmailVerifiedAt = domain.Now()

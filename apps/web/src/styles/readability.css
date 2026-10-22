@@ -213,6 +213,38 @@
 .review-layout {
   grid-template-columns: 275px minmax(0, 1fr);
 }
+/* The wait between Checkout returning and the webhook landing. It is a whole
+   screen because it is the one moment the customer has paid and the product
+   still cannot open. */
+.confirming-payment {
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 18px;
+  padding: 35px;
+  text-align: center;
+}
+.confirming-payment > h1 {
+  font-size: 22px;
+  letter-spacing: -0.5px;
+  margin: 0;
+}
+.confirming-payment > p {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--muted);
+  max-width: 52ch;
+  margin: 0;
+}
+.confirming-payment > .confirming-slow {
+  color: var(--text-primary);
+  background: var(--info-soft);
+  border: 1px solid var(--info-border);
+  border-radius: var(--radius);
+  padding: 11px 14px;
+}
 .not-found-page {
   min-height: 100dvh;
   display: flex;

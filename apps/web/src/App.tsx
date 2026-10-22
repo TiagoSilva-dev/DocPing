@@ -2,6 +2,8 @@ import {
   Component,
   Suspense,
   lazy,
+  useEffect,
+  useState,
   type ErrorInfo,
   type ReactNode,
 } from "react";
@@ -34,6 +36,7 @@ const CreateRequest = lazy(() =>
 const RequestDetail = lazy(() =>
   import("@/pages/RequestDetail").then((m) => ({ default: m.RequestDetail })),
 );
+const Subscribe = lazy(() => import("@/pages/Subscribe"));
 const PortalPage = lazy(() =>
   import("@/pages/Portal").then((m) => ({ default: m.PortalPage })),
 );
@@ -93,6 +96,16 @@ function ProtectedLayout() {
         onRetry={() => void refetch()}
       />
     );
+  // The workspace does not open without a subscription. This mirrors the gate
+  // the API applies to every authenticated route: the screen only decides
+  // where to send the person, never what they are allowed to do.
+  if (session.billing?.enabled && !session.billing.entitled)
+    return new URLSearchParams(location.search).get("assinatura") ===
+      "confirmada" ? (
+      <ConfirmingPayment />
+    ) : (
+      <Navigate to="/assinar" replace />
+    );
   return (
     <SessionContext.Provider
       value={{
@@ -106,6 +119,43 @@ function ProtectedLayout() {
     >
       <Shell />
     </SessionContext.Provider>
+  );
+}
+// Checkout sends the browser back the moment the card clears, and the webhook
+// that records the subscription arrives on its own schedule -- usually within
+// seconds, occasionally later. Without this screen the return would bounce
+// off the gate and land back on the pricing page, which reads as "we took
+// your money and nothing happened". So the session is polled instead, and the
+// layout opens by itself the moment the subscription is recorded.
+function ConfirmingPayment() {
+  useQuery({
+    queryKey: ["session"],
+    queryFn: getSession,
+    retry: false,
+    refetchInterval: 2000,
+  });
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => setSlow(true), 20000);
+    return () => clearTimeout(timer);
+  }, []);
+  return (
+    <div className="confirming-payment">
+      <Logo />
+      <Loading />
+      <h1>Confirmando seu pagamento…</h1>
+      <p>
+        O pagamento foi aprovado. Estamos aguardando a confirmação da Stripe
+        para liberar o escritório — leva alguns segundos.
+      </p>
+      {slow && (
+        <p className="confirming-slow">
+          Está demorando mais que o normal. Nada se perdeu: a confirmação
+          chega e o escritório abre sozinho. Se preferir, atualize a página em
+          alguns minutos.
+        </p>
+      )}
+    </div>
   );
 }
 function NotFound() {
@@ -139,6 +189,7 @@ export default function App() {
                   element={<ResetPasswordPage />}
                 />
                 <Route path="/confirmar-email" element={<VerifyEmailPage />} />
+                <Route path="/assinar" element={<Subscribe />} />
                 <Route path="/p/:token" element={<PortalPage />} />
                 <Route path="/portal/:token" element={<PortalPage />} />
                 <Route path="/app" element={<ProtectedLayout />}>

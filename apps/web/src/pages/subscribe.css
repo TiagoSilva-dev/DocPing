@@ -1,0 +1,193 @@
+/* The subscribe screen. Chrome stays neutral, as everywhere else; the only
+   colour is --accent on the recommended plan, which is the same meaning it
+   carries on the landing page. */
+.subscribe-page {
+  min-height: 100dvh;
+  background: var(--bg);
+  color: var(--text-primary);
+  display: flex;
+  flex-direction: column;
+}
+.subscribe-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 22px clamp(16px, 4vw, 40px);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.subscribe-identity {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  min-width: 0;
+}
+.subscribe-identity span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.subscribe-signout {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-primary);
+  border-radius: var(--radius);
+  padding: 7px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.subscribe-signout:hover {
+  background: var(--surface-hover);
+  border-color: var(--border-hover);
+}
+.subscribe-main {
+  width: min(1060px, 100%);
+  margin: 0 auto;
+  padding: clamp(28px, 6vw, 56px) 16px 56px;
+}
+.subscribe-main h1 {
+  margin: 0 0 12px;
+  font-size: clamp(26px, 3.4vw, 38px);
+  line-height: 1.18;
+  letter-spacing: -1.1px;
+  font-weight: 560;
+}
+.subscribe-lead {
+  margin: 0 0 24px;
+  max-width: 62ch;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+.subscribe-note,
+.subscribe-error {
+  margin: 0 0 20px;
+  padding: 11px 14px;
+  border-radius: var(--radius);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.subscribe-note {
+  background: var(--info-soft);
+  border: 1px solid var(--info-border);
+  color: var(--info);
+}
+.subscribe-error {
+  background: var(--danger-soft);
+  border: 1px solid var(--danger-border);
+  color: var(--danger);
+}
+.subscribe-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  align-items: stretch;
+}
+.subscribe-plan {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 22px 20px;
+  position: relative;
+}
+.subscribe-plan-featured {
+  border-color: var(--accent-border);
+  box-shadow: var(--shadow);
+}
+.subscribe-tag {
+  position: absolute;
+  top: -10px;
+  left: 20px;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-border);
+  color: var(--accent-strong);
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.subscribe-plan h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 560;
+}
+.subscribe-pitch {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  min-height: 39px;
+}
+.subscribe-price {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  margin: 6px 0 2px;
+}
+.subscribe-price span {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.subscribe-price strong {
+  font-size: 34px;
+  font-weight: 580;
+  letter-spacing: -1.4px;
+}
+.subscribe-plan ul {
+  list-style: none;
+  margin: 6px 0 18px;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.subscribe-plan li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 14px;
+  line-height: 1.45;
+}
+.subscribe-plan li svg {
+  margin-top: 3px;
+  flex: none;
+  color: var(--text-secondary);
+}
+.subscribe-plan button {
+  margin-top: auto;
+  width: 100%;
+  justify-content: center;
+}
+.subscribe-plan button.subscribe-cta-featured {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.subscribe-plan button.subscribe-cta-featured:hover:not(:disabled) {
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+}
+.subscribe-foot {
+  margin: 24px 0 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  max-width: 68ch;
+}
+.subscribe-current {
+  margin-top: 6px;
+}
+@media (max-width: 880px) {
+  .subscribe-grid {
+    grid-template-columns: 1fr;
+  }
+  .subscribe-pitch {
+    min-height: 0;
+  }
+}

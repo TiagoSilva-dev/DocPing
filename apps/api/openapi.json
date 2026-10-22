@@ -2109,6 +2109,193 @@
           }
         ]
       }
+    },
+    "/billing/checkout": {
+      "post": {
+        "summary": "Abrir pagamento do plano",
+        "description": "Cria uma sessão de Stripe Checkout (assinatura mensal) e responde com a URL hospedada. Exige sessão e X-CSRF-Token. Nenhum dado de cartão passa por esta API.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "plan": {
+                    "type": "string",
+                    "enum": [
+                      "essencial",
+                      "escritorio",
+                      "rede"
+                    ]
+                  }
+                },
+                "required": [
+                  "plan"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "URL hospedada pela Stripe",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "url": {
+                      "type": "string",
+                      "format": "uri"
+                    }
+                  },
+                  "required": [
+                    "url"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Demonstração não assina (demo_organization) ou assinatura já ativa (already_subscribed)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Plano que esta instalação não vende",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "A Stripe não respondeu (billing_unavailable)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Instalação sem cobrança configurada (billing_disabled)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/billing/portal": {
+      "post": {
+        "summary": "Abrir a área de cobrança",
+        "description": "Cria uma sessão do portal do cliente da Stripe, onde se troca o cartão, muda de plano e cancela. Exige sessão e X-CSRF-Token.",
+        "responses": {
+          "200": {
+            "description": "URL hospedada pela Stripe",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "url": {
+                      "type": "string",
+                      "format": "uri"
+                    }
+                  },
+                  "required": [
+                    "url"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "O escritório nunca assinou (no_subscription)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "A Stripe não respondeu (billing_unavailable)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Instalação sem cobrança configurada (billing_disabled)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/billing/webhook": {
+      "post": {
+        "summary": "Entrada de eventos da Stripe",
+        "description": "Sem sessão, sem CSRF e sem checagem de origem: o que autentica a chamada é o cabeçalho Stripe-Signature, verificado por HMAC-SHA256 sobre 'timestamp.corpo' com tolerância de 5 minutos. Corpo é o evento da Stripe, lido cru. Tipo não tratado responde 200 e é ignorado; 500 só quando a falha é nossa, porque é o que faz a Stripe reentregar.",
+        "parameters": [
+          {
+            "name": "Stripe-Signature",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Evento aceito ou ignorado"
+          },
+          "400": {
+            "description": "Assinatura inválida; sem corpo, por não dar pista a quem sonda"
+          },
+          "404": {
+            "description": "Instalação sem cobrança configurada"
+          },
+          "500": {
+            "description": "Falha nossa ao aplicar; a Stripe reentrega"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2180,6 +2367,22 @@
               "auto"
             ],
             "description": "Modo da análise automática desta organização."
+          },
+          "subscriptionStatus": {
+            "type": "string"
+          },
+          "stripeCustomerId": {
+            "type": "string"
+          },
+          "stripeSubscriptionId": {
+            "type": "string"
+          },
+          "currentPeriodEnd": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "cancelAtPeriodEnd": {
+            "type": "boolean"
           }
         }
       },
@@ -2215,6 +2418,9 @@
               "development",
               "production"
             ]
+          },
+          "billing": {
+            "$ref": "#/components/schemas/BillingState"
           }
         },
         "required": [
@@ -2958,6 +3164,56 @@
         "required": [
           "message"
         ]
+      },
+      "BillingState": {
+        "type": "object",
+        "description": "O que o servidor diz que este escritório pode fazer. 'entitled' é o único campo que decide algo; os limites são para a tela mostrar. Com 'enabled' falso a instalação não cobra e 'entitled' é sempre verdadeiro.",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "entitled": {
+            "type": "boolean"
+          },
+          "plan": {
+            "type": "string",
+            "description": "essencial, escritorio, rede, founder_pilot, demo ou vazio"
+          },
+          "status": {
+            "type": "string",
+            "description": "Vocabulário da própria Stripe: active, trialing, past_due, canceled, unpaid, incomplete, paused"
+          },
+          "periodEnd": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "cancelAtPeriodEnd": {
+            "type": "boolean"
+          },
+          "manageable": {
+            "type": "boolean",
+            "description": "Há cliente Stripe gravado, então a área de cobrança abre"
+          },
+          "activeRequests": {
+            "type": "integer"
+          },
+          "limits": {
+            "type": "object",
+            "properties": {
+              "activeRequests": {
+                "type": "integer",
+                "description": "0 significa sem limite próprio do plano"
+              },
+              "storageBytes": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "clients": {
+                "type": "integer"
+              }
+            }
+          }
+        }
       }
     },
     "securitySchemes": {

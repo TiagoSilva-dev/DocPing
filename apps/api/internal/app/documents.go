@@ -230,6 +230,12 @@ func (a *App) commitUpload(c *call, prepared domain.DocumentFile, consumed *bool
 	if orgLimit == 0 {
 		orgLimit = 1 << 30
 	}
+	// The plan's storage, when it has one of its own, applies on top of the
+	// deployment ceiling -- never above it. A plan sold with more space than
+	// the installation can hold would be a promise the server cannot keep.
+	if planBytes := c.S.Organizations[r.OrgID].Entitlement().StorageBytes; planBytes > 0 && planBytes < orgLimit {
+		orgLimit = planBytes
+	}
 	if requestLimit == 0 {
 		requestLimit = 500 << 20
 	}

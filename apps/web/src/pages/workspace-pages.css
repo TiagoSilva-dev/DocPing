@@ -1354,3 +1354,57 @@
   color: var(--muted);
   margin-top: 4px;
 }
+
+/* Plano e cobrança. The dot repeats what the label already says, never
+   replaces it: colour alone is not a signal anywhere in this product. */
+.wp-billing-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 14px 20px;
+  margin: 0 0 16px;
+}
+.wp-billing-facts div {
+  display: grid;
+  gap: 4px;
+}
+.wp-billing-facts dt {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+.wp-billing-facts dd {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 15px;
+}
+.wp-billing-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+.wp-billing-dot-ok {
+  background: var(--ok);
+}
+.wp-billing-dot-off {
+  background: var(--danger);
+}
+.wp-billing-note {
+  margin: 0 0 16px;
+  padding: 11px 14px;
+  border-radius: var(--radius);
+  background: var(--warn-soft);
+  border: 1px solid var(--warn-border);
+  color: var(--warn);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.wp-billing-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
