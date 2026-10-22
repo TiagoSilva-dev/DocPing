@@ -7,13 +7,15 @@ package persistence
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"database/sql"
 	"docping/api/internal/domain"
 	"docping/api/migrations"
 	"encoding/json"
 	"errors"
 	"fmt"
-	_ "github.com/go-sql-driver/mysql"
+	"github.com/go-sql-driver/mysql"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,6 +28,35 @@ type Store struct {
 	file  string
 	db    *sql.DB
 	state *domain.State
+}
+
+// CATLSConfig names the DSN tls= mode that verifies the server against a CA
+// given by the operator instead of the system roots. It lives here, next to
+// the code that opens the connection, so that anything else which needs to
+// reach the same database -- a maintenance command, for instance -- registers
+// the very same anchor instead of a second copy of it.
+const CATLSConfig = "docping-ca"
+
+// RegisterCA makes that mode available for a PEM the operator supplied. It
+// changes which CA is trusted, never whether the certificate is checked: the
+// chain is verified and ServerName stays empty so the driver fills it with
+// the host from the DSN, keeping the hostname check. An unparsable CA is
+// refused, so the mode cannot decay into an unverified connection.
+func RegisterCA(pem string) error { return RegisterCAWithName(pem, "") }
+
+// RegisterCAWithName is the same, for the case where the certificate names a
+// host that is not the one being dialled. A managed database reached through
+// a TCP proxy answers on the proxy's address while presenting the private
+// hostname it was issued for, and an operator tool run from outside has to
+// say which name to expect. It is still a real check -- the chain is
+// verified and the name is matched -- so it is not a way around verification,
+// only a way to name the host the certificate was actually issued for.
+func RegisterCAWithName(pem, serverName string) error {
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM([]byte(pem)) {
+		return errors.New("MYSQL_CA_CERT must be a PEM-encoded certificate")
+	}
+	return mysql.RegisterTLSConfig(CATLSConfig, &tls.Config{RootCAs: pool, ServerName: serverName, MinVersion: tls.VersionTLS12})
 }
 
 func Open(driver, dsn, path, env string) (*Store, error) {

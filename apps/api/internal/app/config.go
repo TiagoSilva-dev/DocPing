@@ -1,9 +1,9 @@
 package app
 
 import (
-	"crypto/tls"
 	"crypto/x509"
 	"docping/api/internal/domain"
+	"docping/api/internal/persistence"
 	"errors"
 	"github.com/go-sql-driver/mysql"
 	"net"
@@ -373,7 +373,9 @@ func (c Config) ClientIP(remoteAddr, forwardedFor string) string {
 // checked: the chain is verified and ServerName keeps the hostname check that
 // tls=true would have done. A missing or unparsable CA is refused, so the mode
 // cannot decay into an unverified connection.
-const mysqlCATLSConfig = "docping-ca"
+// The anchor itself is registered by the persistence package, which is what
+// opens the connection; this is only the configuration rule around it.
+const mysqlCATLSConfig = persistence.CATLSConfig
 
 func (c Config) registerMySQLCA() error {
 	if c.MySQLCACert == "" {
@@ -382,14 +384,7 @@ func (c Config) registerMySQLCA() error {
 		}
 		return nil
 	}
-	pool := x509.NewCertPool()
-	if !pool.AppendCertsFromPEM([]byte(c.MySQLCACert)) {
-		return errors.New("MYSQL_CA_CERT must be a PEM-encoded certificate")
-	}
-	// ServerName is deliberately left empty: the driver fills it with the host
-	// from the DSN, so the hostname is checked against the address actually
-	// dialled rather than one restated here.
-	return mysql.RegisterTLSConfig(mysqlCATLSConfig, &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12})
+	return persistence.RegisterCA(c.MySQLCACert)
 }
 
 // Billing is on when a Stripe key is configured. Everything about charging --
