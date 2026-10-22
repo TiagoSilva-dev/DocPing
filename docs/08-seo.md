@@ -22,12 +22,15 @@ executam JavaScript: as tags que eles leem precisam estar no HTML servido, e o
 HTML é compilado na imagem (`apps/web/Dockerfile`), antes de qualquer variável
 de ambiente de execução existir.
 
-**Enquanto o DNS de `docping.com.br` não apontar para o serviço `web`**, o
-canonical aponta para um endereço que não responde e o host
-`web-production-18459.up.railway.app` não será indexado. Isso é o efeito
-desejado — um host `*.up.railway.app` indexado viraria conteúdo duplicado no dia
-da troca —, mas é uma pendência, não um estado final. Ao apontar o domínio,
-atualize também `WEB_ORIGIN` (ver [07 — Deploy](07-deploy.md)).
+Desde 22/10/2026 o DNS aponta para o serviço `web` e o canonical responde:
+`https://docping.com.br` serve a landing em HTTPS com certificado válido, e
+`WEB_ORIGIN` já é esse endereço. O host `web-production-*.up.railway.app` foi
+removido do serviço, então não há um segundo endereço servindo a mesma página —
+que era o risco de conteúdo duplicado. Como chegar lá está em
+[07 — Deploy](07-deploy.md).
+
+Indexação é outra coisa, e segue pendente: nada foi submetido ao Search Console
+e nenhuma busca real foi conferida.
 
 ## O que é indexável
 

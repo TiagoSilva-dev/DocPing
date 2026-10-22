@@ -82,6 +82,47 @@ Três comportamentos custaram tempo e vale registrar:
   de `main`. Hoje `api` e `web` estão fixados por commit, o que é determinístico
   mas **não** redeploya a cada push: ao mudar de commit, refixe a origem.
 
+## O domínio próprio
+
+`docping.com.br` serve o `web` desde 22/10/2026, com certificado Let's Encrypt
+emitido pela Railway (`CN=docping.com.br`, válido até 20/01/2027). O DNS
+continua na Hostinger; não foi preciso mover nameservers.
+
+A Railway não publica IP fixo, então um domínio só chega nela por `CNAME`. Na
+raiz o padrão de DNS proíbe `CNAME` (RFC 1912), e só funciona em provedor que
+implemente *flattening*/ALIAS — a documentação da Railway lista a Hostinger
+entre os que **não** fazem isso. Na prática ela faz: o editor de zona aceita
+`CNAME` em `@` e grava um ALIAS. O que ele recusa é a convivência, com a
+mensagem `RRset docping.com.br IN ALIAS must not be used with AAAA on the same
+name` — o apex trazia o `A` e o `AAAA` da página estacionada da Hostinger, e o
+ALIAS não divide o nome com eles.
+
+A zona final, no apex:
+
+| Tipo | Nome | Valor |
+|---|---|---|
+| CNAME (gravado como ALIAS) | `@` | `6bl1afkk.up.railway.app` |
+| TXT | `_railway-verify` | `railway-verify=<token do painel>` |
+
+Os dois são obrigatórios: sem o TXT a Railway não confirma a posse e responde
+404 mesmo com o roteamento correto. Apagar o `A` e o `AAAA` do apex antes de
+criar o ALIAS; **não** tocar em `MX`, no TXT do SPF, nos três `CNAME
+hostingermail-*._domainkey`, no `_dmarc` nem no `autodiscover`, que são o
+e-mail do domínio.
+
+Ordem importa mais do que parece. Cadastrar o domínio na Railway antes de o DNS
+existir faz com que ela peça o certificado enquanto o apex ainda responde outro
+servidor; cada pedido vira uma *failed authorization* no Let's Encrypt, que
+limita a cinco por hostname por hora, e a emissão passa a falhar por limite e
+não por configuração. A espera resolve — nenhum certificado chega a ser
+emitido, então o limite semanal de duplicatas não entra na conta. Crie os
+registros primeiro, ou aceite esperar a janela de uma hora.
+
+`WEB_ORIGIN` passou a ser `https://docping.com.br`, e `WEB_ORIGINS` está vazio
+de propósito: o `web-production-*.up.railway.app` foi removido do serviço, e um
+endereço que não controlamos mais não pode continuar numa lista de origens
+permitidas. Gerar um domínio da Railway de novo exige recolocá-lo ali.
+
 ## Variáveis de ambiente
 
 ### Serviço `web`
@@ -327,8 +368,20 @@ Sem validação:
 
 - **E-mail não sai** — `SMTP_HOST` é placeholder, por decisão de quem operou o
   deploy. As entregas ficam registradas como falha.
-- Domínio próprio, Playwright e validação visual seguem pendentes, como
-  registra `docs/06-validacao-da-entrega.md`.
+- Playwright e validação visual seguem pendentes, como registra
+  `docs/06-validacao-da-entrega.md`.
+
+O domínio saiu de pendente: `https://docping.com.br` responde `200` com
+certificado válido pela cadeia e pelo hostname, `/api/health` responde `{"status":"ok"}`
+pelo apex, `http://` redireciona com `301`, a origem nova passa na checagem
+(`401 unauthorized` em `/api/session`, que é a resposta de quem não tem sessão)
+e uma origem estranha recebe `403 origin_rejected`.
+
+Com a confirmação de e-mail, `SMTP_HOST` placeholder deixou de ser só uma
+entrega que falha: um cadastro novo responde `verification_sent` e nunca
+recebe o link, então **não consegue entrar**. Contas já confirmadas seguem
+entrando — `User.EmailPending` vazio significa "não pendente". Antes de
+qualquer piloto, configure SMTP real.
 
 O banco de produção contém organizações de teste criadas pelo smoke manual,
 com e-mails `smoke-*@docping-smoke.invalid`.
