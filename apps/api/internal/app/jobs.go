@@ -156,7 +156,21 @@ func (a *App) prepareDelivery(s *domain.State, r domain.Request, kind, channel s
 	default:
 		client, org := s.Clients[r.ClientID], s.Organizations[r.OrgID]
 		link, _ := a.issueLink(s, r)
-		body := fmt.Sprintf("Olá, %s.\n\n%s solicita: %s (%s).\nPrazo: %s.\n\nEnvie e acompanhe seus documentos: %s\n\nSe houver uma correção, consulte o motivo no portal.\n", client.ContactName, org.Name, r.Title, r.Competence, r.DueDate, link)
+		// This is the one message a client of the office receives, and the
+		// only one carrying text the office wrote -- its name, the title of
+		// the request, the contact's name. The layout escapes all of it.
+		content := emailContent{
+			Preheader: fmt.Sprintf("%s solicita: %s — prazo %s", org.Name, r.Title, civilDate(r.DueDate)),
+			Heading:   "Documentos solicitados",
+			Paragraphs: []string{
+				fmt.Sprintf("Olá, %s.", client.ContactName),
+				fmt.Sprintf("%s solicita: %s (%s).", org.Name, r.Title, competenceLabel(r.Competence)),
+				fmt.Sprintf("Prazo: %s.", civilDate(r.DueDate)),
+			},
+			Action: &emailAction{Label: "Enviar meus documentos", URL: link},
+			Note:   "Se houver uma correção, consulte o motivo no portal. Não é preciso criar conta para enviar.",
+		}
+		body, htmlBody := plainEmail(content), a.renderEmail(content)
 		d.Status = "pending"
 		effect = func() error {
 			status, reason := "accepted", ""
@@ -184,7 +198,7 @@ func (a *App) prepareDelivery(s *domain.State, r domain.Request, kind, channel s
 			}
 			if !allowed {
 				status = "failed"
-			} else if err := a.sendEmail(client.Email, "Documentos solicitados — "+org.Name, body); err != nil {
+			} else if err := a.sendEmailHTML(client.Email, "Documentos solicitados — "+org.Name, body, htmlBody); err != nil {
 				status, reason = "failed", err.Error()
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

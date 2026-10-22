@@ -167,3 +167,42 @@ func headerValue(headers, name string) string {
 	}
 	return ""
 }
+
+// The portal message is the only one carrying text the office wrote, so the
+// escaping matters here for real: an organization called "Alves & Cia" must
+// not break the markup, and a title must not be able to inject any.
+func TestThePortalMessageEscapesWhatTheOfficeWrote(t *testing.T) {
+	app, _ := setup(t)
+	out := app.renderEmail(emailContent{
+		Heading:    "Documentos solicitados",
+		Paragraphs: []string{`Alves & Cia solicita: Fechamento <b>mensal</b> (10/2026).`},
+		Action:     &emailAction{Label: "Enviar meus documentos", URL: "https://docping.com.br/p/tok&en"},
+	})
+	if strings.Contains(out, "<b>mensal</b>") {
+		t.Fatalf("a title injected markup:\n%s", out)
+	}
+	if !strings.Contains(out, "Alves &amp; Cia") {
+		t.Fatalf("the ampersand was not escaped:\n%s", out)
+	}
+	if !strings.Contains(out, "/p/tok&amp;en") {
+		t.Fatalf("the address was not escaped as an attribute:\n%s", out)
+	}
+}
+
+// Dates reach a client of the office, so they are written the way a reader
+// in Brazil expects -- and an unparsable one is printed as stored rather
+// than hidden.
+func TestDatesAreWrittenForTheReader(t *testing.T) {
+	if got := civilDate("2026-11-20"); got != "20/11/2026" {
+		t.Fatalf("due date: %q", got)
+	}
+	if got := competenceLabel("2026-10"); got != "10/2026" {
+		t.Fatalf("competence: %q", got)
+	}
+	if got := civilDate("amanhã"); got != "amanhã" {
+		t.Fatalf("an unreadable date should survive: %q", got)
+	}
+	if got := competenceLabel(""); got != "" {
+		t.Fatalf("empty competence: %q", got)
+	}
+}

@@ -3,6 +3,7 @@ package app
 import (
 	"html"
 	"strings"
+	"time"
 )
 
 // The HTML shell for a transactional message. It is built here, in the
@@ -123,4 +124,24 @@ func plainEmail(c emailContent) string {
 		b.WriteString(c.Note + "\n")
 	}
 	return b.String()
+}
+
+// civilDate and competenceLabel put a date in the form a Brazilian reader
+// expects. Both return the stored value untouched when it cannot be parsed:
+// a message that hides a date it failed to read is worse than one that
+// prints it oddly.
+func civilDate(value string) string {
+	t, err := time.Parse("2006-01-02", value)
+	if err != nil {
+		return value
+	}
+	return t.Format("02/01/2006")
+}
+
+func competenceLabel(value string) string {
+	t, err := time.Parse("2006-01", value)
+	if err != nil {
+		return value
+	}
+	return t.Format("01/2006")
 }
