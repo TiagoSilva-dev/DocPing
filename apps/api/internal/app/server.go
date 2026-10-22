@@ -60,6 +60,8 @@ func (a *App) routes() http.Handler {
 	a.handle(m, "POST /api/auth/logout", true, true, a.logout)
 	a.handle(m, "POST /api/auth/forgot-password", true, false, a.forgotPassword)
 	a.handle(m, "POST /api/auth/reset-password", true, false, a.resetPassword)
+	a.handle(m, "POST /api/auth/verify-email", true, false, a.verifyEmail)
+	a.handle(m, "POST /api/auth/resend-verification", true, false, a.resendVerification)
 	a.handle(m, "GET /api/clients", false, true, a.clients)
 	a.handle(m, "GET /api/clients/{id}", false, true, a.client)
 	a.handle(m, "POST /api/clients", true, true, a.createClient)
@@ -152,9 +154,15 @@ func (a *App) security(next http.Handler) http.Handler {
 			w.WriteHeader(204)
 			return
 		}
-		group, max := "api", 600
+		group, max, window := "api", 600, time.Minute
 		if strings.Contains(r.URL.Path, "/auth/") {
 			group, max = "auth", 20
+		}
+		// Creating a demonstration costs an organization with a dozen sample
+		// clients and requests, so it is budgeted per hour rather than per
+		// minute: a prospect needs one, not twenty.
+		if r.URL.Path == "/api/auth/demo" {
+			group, max, window = "demo", a.Config.DemoRateHourly, time.Hour
 		}
 		if strings.Contains(r.URL.Path, "/portal/") {
 			group, max = "portal", 120
@@ -163,7 +171,12 @@ func (a *App) security(next http.Handler) http.Handler {
 			}
 		}
 		ip := a.Config.ClientIP(r.RemoteAddr, r.Header.Get("X-Forwarded-For"))
-		if !a.limiter.Allow(group+":"+ip, max, time.Minute) {
+		if !a.limiter.Allow(group+":"+ip, max, window) {
+			if group == "demo" {
+				w.Header().Set("Retry-After", "3600")
+				writeError(w, fail(429, "rate_limited", "Você já abriu demonstrações demais deste dispositivo. Tente novamente em uma hora."))
+				return
+			}
 			w.Header().Set("Retry-After", "60")
 			writeError(w, fail(429, "rate_limited", "Muitas tentativas. Aguarde um minuto."))
 			return
@@ -289,12 +302,14 @@ func (a *App) StartWorker(ctx context.Context) {
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
 	a.tick(ctx, time.Now())
+	a.cleanup(ctx, time.Now())
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case now := <-ticker.C:
 			a.tick(ctx, now)
+			a.cleanup(ctx, now)
 		}
 	}
 }

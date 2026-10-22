@@ -35,7 +35,7 @@ func setup(t *testing.T) (*App, http.Handler) {
 		t.Fatal(err)
 	}
 	loc, _ := time.LoadLocation("America/Sao_Paulo")
-	app := &App{Config: Config{Env: "development", Origin: "http://localhost:5173", ClientLimit: 30, MaxUpload: 20 << 20, Location: loc}, Store: store, Objects: obj}
+	app := &App{Config: Config{Env: "development", Origin: "http://localhost:5173", ClientLimit: 30, MaxUpload: 20 << 20, Location: loc, DemoTTL: 24 * time.Hour, UnverifiedTTL: 168 * time.Hour, DemoMaxActive: 200, DemoRateHourly: 50}, Store: store, Objects: obj}
 	return app, app.Handler()
 }
 func req(t *testing.T, h http.Handler, method, path string, body any, s testSession) (int, []byte, *httptest.ResponseRecorder) {

@@ -38,7 +38,12 @@ type User struct {
 	Email        string `json:"email"`
 	PasswordHash string `json:"-"`
 	StoredHash   string `json:"passwordHash,omitempty"`
-	CreatedAt    string `json:"createdAt"`
+	// EmailPending gates login until the address is confirmed. The zero value
+	// means "not pending", so every account stored before this field existed
+	// keeps working without a data migration; only new registrations set it.
+	EmailPending    bool   `json:"emailPending,omitempty"`
+	EmailVerifiedAt string `json:"emailVerifiedAt,omitempty"`
+	CreatedAt       string `json:"createdAt"`
 }
 type Session struct {
 	Hash      string `json:"hash"`
@@ -209,6 +214,18 @@ type Audit struct {
 	EntityID  string `json:"entityId"`
 	CreatedAt string `json:"createdAt"`
 }
+
+// EmailVerification proves the registrant controls the address. It carries
+// the address it was issued for: an account whose e-mail changed before the
+// link is used must not be confirmed by the stale token.
+type EmailVerification struct {
+	Hash      string `json:"hash"`
+	UserID    string `json:"userId"`
+	Email     string `json:"email"`
+	ExpiresAt string `json:"expiresAt"`
+	Used      bool   `json:"used"`
+	SentAt    string `json:"sentAt"`
+}
 type PasswordReset struct {
 	Hash      string `json:"hash"`
 	UserID    string `json:"userId"`
@@ -216,22 +233,23 @@ type PasswordReset struct {
 	Used      bool   `json:"used"`
 }
 type State struct {
-	Organizations map[string]Organization  `json:"organizations"`
-	Users         map[string]User          `json:"users"`
-	Sessions      map[string]Session       `json:"sessions"`
-	Clients       map[string]Client        `json:"clients"`
-	Templates     map[string]Template      `json:"templates"`
-	Requests      map[string]Request       `json:"requests"`
-	Tokens        map[string]PublicToken   `json:"tokens"`
-	Schedules     map[string]Schedule      `json:"schedules"`
-	Runs          map[string]ScheduleRun   `json:"runs"`
-	Deliveries    map[string]Delivery      `json:"deliveries"`
-	Audits        map[string]Audit         `json:"audits"`
-	Resets        map[string]PasswordReset `json:"resets"`
+	Organizations map[string]Organization      `json:"organizations"`
+	Users         map[string]User              `json:"users"`
+	Sessions      map[string]Session           `json:"sessions"`
+	Clients       map[string]Client            `json:"clients"`
+	Templates     map[string]Template          `json:"templates"`
+	Requests      map[string]Request           `json:"requests"`
+	Tokens        map[string]PublicToken       `json:"tokens"`
+	Schedules     map[string]Schedule          `json:"schedules"`
+	Runs          map[string]ScheduleRun       `json:"runs"`
+	Deliveries    map[string]Delivery          `json:"deliveries"`
+	Audits        map[string]Audit             `json:"audits"`
+	Resets        map[string]PasswordReset     `json:"resets"`
+	Verifications map[string]EmailVerification `json:"verifications"`
 }
 
 func NewState() *State {
-	return &State{Organizations: map[string]Organization{}, Users: map[string]User{}, Sessions: map[string]Session{}, Clients: map[string]Client{}, Templates: map[string]Template{}, Requests: map[string]Request{}, Tokens: map[string]PublicToken{}, Schedules: map[string]Schedule{}, Runs: map[string]ScheduleRun{}, Deliveries: map[string]Delivery{}, Audits: map[string]Audit{}, Resets: map[string]PasswordReset{}}
+	return &State{Organizations: map[string]Organization{}, Users: map[string]User{}, Sessions: map[string]Session{}, Clients: map[string]Client{}, Templates: map[string]Template{}, Requests: map[string]Request{}, Tokens: map[string]PublicToken{}, Schedules: map[string]Schedule{}, Runs: map[string]ScheduleRun{}, Deliveries: map[string]Delivery{}, Audits: map[string]Audit{}, Resets: map[string]PasswordReset{}, Verifications: map[string]EmailVerification{}}
 }
 
 // AIReviewModes are the automated-review settings an organization may choose.

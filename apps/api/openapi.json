@@ -52,7 +52,14 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Session"
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/PendingVerification"
+                    },
+                    {
+                      "$ref": "#/components/schemas/Session"
+                    }
+                  ]
                 }
               }
             }
@@ -99,6 +106,110 @@
               }
             }
           }
+        },
+        "description": "Cria o escritório e envia o link de confirmação. Devolve PendingVerification; a sessão só é aberta em /auth/verify-email. Sem SMTP configurado (apenas desenvolvimento) devolve Session."
+      }
+    },
+    "/auth/verify-email": {
+      "post": {
+        "summary": "Verify e-mail",
+        "description": "Confirma o endereço e abre a sessão. Token de uso único, válido por 24 horas.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "token": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "token"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Sucesso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Session"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "Link de confirmação usado, expirado ou inválido (verification_expired)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Erro padronizado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/resend-verification": {
+      "post": {
+        "summary": "Resend verification",
+        "description": "Reenvia o link de confirmação. Resposta genérica em qualquer caso; intervalo mínimo de 2 minutos.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  }
+                },
+                "required": [
+                  "email"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Sucesso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Message"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Erro padronizado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
         }
       }
     },
@@ -112,6 +223,26 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Session"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Credenciais inválidas (invalid_credentials)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "E-mail ainda não confirmado (email_unverified)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -165,6 +296,26 @@
               }
             }
           },
+          "429": {
+            "description": "Limite por IP excedido (rate_limited), com Retry-After",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Sem vagas de demonstração no momento (demo_unavailable)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "default": {
             "description": "Erro padronizado",
             "content": {
@@ -175,7 +326,8 @@
               }
             }
           }
-        }
+        },
+        "description": "Abre um escritório de demonstração com dados fictícios. Limitado por IP (DEMO_RATE_PER_HOUR) e por total de demonstrações vivas (DEMO_MAX_ACTIVE); cada uma é apagada após DEMO_TTL_HOURS."
       }
     },
     "/auth/logout": {
@@ -2775,6 +2927,37 @@
             "format": "date-time"
           }
         }
+      },
+      "PendingVerification": {
+        "type": "object",
+        "description": "Cadastro criado, aguardando confirmação do e-mail. Nenhuma sessão é aberta.",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "verification_sent"
+            ]
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          }
+        },
+        "required": [
+          "status",
+          "email"
+        ]
+      },
+      "Message": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ]
       }
     },
     "securitySchemes": {

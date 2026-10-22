@@ -1,11 +1,9 @@
 package app
 
 import (
-	"bufio"
 	"context"
 	"docping/api/internal/domain"
 	"encoding/json"
-	"fmt"
 	"net"
 	"regexp"
 	"strings"
@@ -27,47 +25,7 @@ func smtpFixture(t *testing.T) (string, string, <-chan string) {
 			if err != nil {
 				return
 			}
-			go func(conn net.Conn) {
-				defer conn.Close()
-				_ = conn.SetDeadline(time.Now().Add(10 * time.Second))
-				writer := bufio.NewWriter(conn)
-				reader := bufio.NewReader(conn)
-				send := func(s string) { fmt.Fprint(writer, s+"\r\n"); writer.Flush() }
-				send("220 localhost SMTP test")
-				for {
-					line, err := reader.ReadString('\n')
-					if err != nil {
-						return
-					}
-					upper := strings.ToUpper(strings.TrimSpace(line))
-					switch {
-					case strings.HasPrefix(upper, "EHLO"), strings.HasPrefix(upper, "HELO"):
-						send("250 localhost")
-					case strings.HasPrefix(upper, "MAIL"), strings.HasPrefix(upper, "RCPT"):
-						send("250 accepted")
-					case upper == "DATA":
-						send("354 Send message")
-						var message strings.Builder
-						for {
-							part, e := reader.ReadString('\n')
-							if e != nil {
-								return
-							}
-							if strings.TrimSpace(part) == "." {
-								break
-							}
-							message.WriteString(part)
-						}
-						messages <- message.String()
-						send("250 queued")
-					case upper == "QUIT":
-						send("221 bye")
-						return
-					default:
-						send("250 ok")
-					}
-				}
-			}(conn)
+			go serveSMTPConn(conn, messages)
 		}
 	}()
 	host, port, _ := net.SplitHostPort(listener.Addr().String())

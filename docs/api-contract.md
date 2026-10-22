@@ -8,7 +8,7 @@ Sessão autenticada usa cookie `docping_session`, HttpOnly, SameSite=Lax, Secure
 
 Rate limiting por IP usa o endereço da conexão. `X-Forwarded-For` só é considerado quando o par direto está em `TRUSTED_PROXY_CIDRS` (lista de IPs/CIDRs, vazia por padrão), tomando a primeira entrada fora dessas faixas; sem isso, todo o tráfego atrás de um proxy compartilharia um único limite. Para desenvolvimento use o proxy `/api` do Vite; o cliente HTTP inclui `credentials: 'include'`.
 
-`GET /session`, `POST /auth/register`, `POST /auth/login` e `POST /auth/demo` retornam:
+`GET /session`, `POST /auth/login`, `POST /auth/demo` e `POST /auth/verify-email` retornam:
 
 ```json
 {
@@ -24,12 +24,18 @@ Rate limiting por IP usa o endereço da conexão. `X-Forwarded-For` só é consi
 }
 ```
 
-- `POST /auth/register`: `{organizationName,name,email,password}`. Senha de 12 a 128 caracteres, Argon2id (64MiB,3 iterações,1 thread), e-mail único. Cria escritório vazio com três modelos iniciais; não cria clientes/documentos de demonstração.
-- `POST /auth/login`: `{email,password}`. Mensagem genérica para credenciais inválidas.
-- `POST /auth/demo`: cria um escritório de demonstração isolado, sem credenciais compartilhadas. Os documentos são PDFs sintéticos gerados sob autorização no endpoint de arquivo, marcados `sample:true`; e-mails externos ficam desativados. Não há sessão demo implícita. A sessão e o portal incluem `environment` (`development` ou `production`) para identificar claramente espaços locais antes do primeiro upload.
+- `POST /auth/register`: `{organizationName,name,email,password}`. Senha de 12 a 128 caracteres, Argon2id (64MiB,3 iterações,1 thread), e-mail único. Cria escritório vazio com três modelos iniciais; não cria clientes/documentos de demonstração. **Não devolve sessão:** responde `{status:"verification_sent",email}` e envia o link de confirmação. O escritório só fica acessível depois da confirmação. Sem SMTP configurado — situação possível apenas em desenvolvimento, já que produção exige SMTP — a conta nasce confirmada e a resposta é a sessão, como antes.
+- `POST /auth/verify-email`: `{token}`. Confirma o endereço e abre a sessão, de uso único, válido por 24h. `410 verification_expired` para link usado, expirado, inexistente ou emitido para um e-mail que a conta não usa mais. Link frontend `/confirmar-email?token=...`.
+- `POST /auth/resend-verification`: `{email}`; resposta genérica `{message}` em qualquer caso, inclusive para e-mail sem conta. Um link novo invalida o anterior e há intervalo mínimo de 2 minutos entre envios.
+- `POST /auth/login`: `{email,password}`. Mensagem genérica para credenciais inválidas. `403 email_unverified` quando a senha está correta mas o e-mail nunca foi confirmado — verificado depois da senha, para a resposta não revelar o estado de uma conta a quem não tem a credencial.
+- `POST /auth/demo`: cria um escritório de demonstração isolado, sem credenciais compartilhadas. Os documentos são PDFs sintéticos gerados sob autorização no endpoint de arquivo, marcados `sample:true`; e-mails externos ficam desativados. Não há sessão demo implícita. A sessão e o portal incluem `environment` (`development` ou `production`) para identificar claramente espaços locais antes do primeiro upload. Limites próprios: `DEMO_RATE_PER_HOUR` por IP (3 por padrão, `429` com `Retry-After: 3600`) e `DEMO_MAX_ACTIVE` demonstrações vivas ao mesmo tempo (200 por padrão, `503 demo_unavailable`). Cada demonstração é apagada integralmente após `DEMO_TTL_HOURS` (24h).
 - `POST /auth/logout`: exige sessão+CSRF, revoga a sessão e limpa o cookie.
 - `POST /auth/forgot-password`: `{email}`; resposta genérica `{message}`. O link é persistido antes da tentativa SMTP, e invalidado em caso de falha; expira em 30min. Link frontend `/redefinir-senha?token=...`.
-- `POST /auth/reset-password`: `{token,password}`; invalida todas as sessões do usuário. O frontend de recuperação pode não estar exposto nesta entrega; endpoints são reais.
+- `POST /auth/reset-password`: `{token,password}`; invalida todas as sessões do usuário. Receber o link prova o controle do endereço, então também confirma um e-mail pendente — sem isso a conta ficaria com senha nova e ainda sem poder entrar.
+
+### Expiração de escritórios não confirmados
+
+Um job em processo (a cada minuto, junto do worker de lembretes) apaga por completo — organização, usuários, sessões, clientes, modelos, solicitações, tokens, entregas, auditoria e objetos no bucket — as organizações que existem sem ninguém ter pagado nem provado nada: demonstrações com mais de `DEMO_TTL_HOURS` e cadastros cujo e-mail nunca foi confirmado com mais de `UNVERIFIED_TTL_HOURS` (168h). Os objetos são removidos antes do estado: falhar ali deixa o estado intacto para a próxima rodada, enquanto apagar o estado primeiro perderia o único registro de quais objetos remover. Uma organização com um usuário confirmado nunca é tocada, e uma organização sem nenhum usuário também não — não é um cadastro abandonado conhecido, e apagá-la esconderia um defeito.
 
 ## Clientes
 

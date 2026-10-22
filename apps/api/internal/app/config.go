@@ -16,8 +16,31 @@ import (
 type Config struct {
 	Env, Port, Origin, Driver, DSN, MySQLCACert, DataDir, S3Endpoint, S3Bucket, S3Access, S3Secret, Scanner, SMTPHost, SMTPPort, SMTPFrom, SMTPUser, SMTPPass string
 	SMTPRequireTLS, AllowUnscanned, S3AcceptUnconfirmedEncryption                                                                                             bool
-	MaxUpload, MaxOrgBytes, MaxRequestBytes                                                                                                                   int64
-	ClientLimit                                                                                                                                               int
+	// SMTPTLSMode is how the connection reaches TLS: "starttls" upgrades a
+	// plain connection (port 587 and most providers), "implicit" speaks TLS
+	// from the first byte (port 465, which Hostinger recommends). Reading the
+	// greeting of an implicit-TLS port over a plain socket never works, so the
+	// mode is part of the configuration rather than something to discover.
+	SMTPTLSMode string
+	// smtpRoots overrides the trust anchors for the SMTP connection. It stays
+	// unexported and nil in every deployment — the system roots — and exists
+	// so a test can serve implicit TLS with a certificate it generated
+	// instead of asking the code to skip verification.
+	smtpRoots                               *x509.CertPool
+	MaxUpload, MaxOrgBytes, MaxRequestBytes int64
+	ClientLimit                             int
+	// Abuse limits for the two routes that create an organization without
+	// anyone paying or proving anything. DemoTTL and UnverifiedTTL are how
+	// long such an organization survives before the cleanup job deletes it;
+	// DemoMaxActive caps how many demos may exist at once, so a distributed
+	// flood cannot grow the state without bound even within the rate limit.
+	DemoTTL, UnverifiedTTL time.Duration
+	DemoMaxActive          int
+	DemoRateHourly         int
+	// VerifyEmail gates login until the registrant confirms the address. It is
+	// derived from SMTP being configured, never set by hand: production always
+	// has SMTP, and a development machine without it must stay usable.
+	VerifyEmail bool
 	// Automated conformity analysis. AIReview is the server-wide switch; an
 	// organization still chooses off/suggest/auto for itself. Extraction is
 	// Docling with PaddleOCR as the OCR fallback for photographed pages, and
@@ -39,6 +62,23 @@ type Config struct {
 	TrustedProxies []*net.IPNet
 }
 
+// SMTP TLS modes. Both are encrypted; they differ only in when.
+const (
+	smtpTLSStartTLS = "starttls"
+	smtpTLSImplicit = "implicit"
+)
+
+// resolveSMTPTLSMode defaults by port, because 465 is implicit TLS by
+// convention and 587/25 are STARTTLS. An explicit SMTP_TLS_MODE always wins.
+func resolveSMTPTLSMode(configured, port string) string {
+	if configured != "" {
+		return strings.ToLower(strings.TrimSpace(configured))
+	}
+	if port == "465" {
+		return smtpTLSImplicit
+	}
+	return smtpTLSStartTLS
+}
 func env(k, fallback string) string {
 	if v := os.Getenv(k); v != "" {
 		return v
@@ -169,7 +209,11 @@ func LoadConfig() (Config, error) {
 	aiChars, _ := strconv.Atoi(env("AI_MAX_CHARS", "24000"))
 	aiApprove, _ := strconv.ParseFloat(env("AI_APPROVE_CONFIDENCE", "0.70"), 64)
 	aiReject, _ := strconv.ParseFloat(env("AI_REJECT_CONFIDENCE", "0.75"), 64)
-	c := Config{Env: env("APP_ENV", "production"), Port: env("PORT", "8080"), Origin: env("WEB_ORIGIN", env("FRONTEND_URL", "http://localhost:5173")), Driver: env("STORE_DRIVER", "mysql"), DSN: env("MYSQL_DSN", os.Getenv("DATABASE_DSN")), MySQLCACert: os.Getenv("MYSQL_CA_CERT"), DataDir: env("DATA_DIR", ".data"), S3Endpoint: os.Getenv("S3_ENDPOINT"), S3Bucket: env("S3_BUCKET", "docping"), S3Access: os.Getenv("S3_ACCESS_KEY"), S3Secret: os.Getenv("S3_SECRET_KEY"), Scanner: os.Getenv("CLAMAV_ADDRESS"), AllowUnscanned: os.Getenv("ALLOW_UNSCANNED_UPLOADS") == "true", S3AcceptUnconfirmedEncryption: os.Getenv("S3_ACCEPT_UNCONFIRMED_ENCRYPTION") == "true", SMTPHost: os.Getenv("SMTP_HOST"), SMTPPort: env("SMTP_PORT", "1025"), SMTPFrom: os.Getenv("SMTP_FROM"), SMTPUser: os.Getenv("SMTP_USERNAME"), SMTPPass: os.Getenv("SMTP_PASSWORD"), SMTPRequireTLS: env("SMTP_REQUIRE_TLS", "true") == "true", MaxUpload: maxBytes, MaxOrgBytes: orgBytes, MaxRequestBytes: requestBytes, ClientLimit: limit, Location: loc, AIReview: os.Getenv("AI_REVIEW_ENABLED") == "true", DoclingURL: os.Getenv("DOCLING_URL"), DoclingKey: os.Getenv("DOCLING_API_KEY"), DoclingLang: env("DOCLING_OCR_LANG", "pt"), PaddleURL: os.Getenv("PADDLEOCR_URL"), JevURL: env("TYPESAFE_API_URL", "https://api.typesafe.ai"), JevKey: os.Getenv("TYPESAFE_API_KEY"), JevModel: env("TYPESAFE_MODEL", "jev-latest"), AIMaxChars: aiChars, AIApprove: aiApprove, AIReject: aiReject}
+	demoHours, _ := strconv.Atoi(env("DEMO_TTL_HOURS", "24"))
+	unverifiedHours, _ := strconv.Atoi(env("UNVERIFIED_TTL_HOURS", "168"))
+	demoMax, _ := strconv.Atoi(env("DEMO_MAX_ACTIVE", "200"))
+	demoRate, _ := strconv.Atoi(env("DEMO_RATE_PER_HOUR", "3"))
+	c := Config{Env: env("APP_ENV", "production"), Port: env("PORT", "8080"), Origin: env("WEB_ORIGIN", env("FRONTEND_URL", "http://localhost:5173")), Driver: env("STORE_DRIVER", "mysql"), DSN: env("MYSQL_DSN", os.Getenv("DATABASE_DSN")), MySQLCACert: os.Getenv("MYSQL_CA_CERT"), DataDir: env("DATA_DIR", ".data"), S3Endpoint: os.Getenv("S3_ENDPOINT"), S3Bucket: env("S3_BUCKET", "docping"), S3Access: os.Getenv("S3_ACCESS_KEY"), S3Secret: os.Getenv("S3_SECRET_KEY"), Scanner: os.Getenv("CLAMAV_ADDRESS"), AllowUnscanned: os.Getenv("ALLOW_UNSCANNED_UPLOADS") == "true", S3AcceptUnconfirmedEncryption: os.Getenv("S3_ACCEPT_UNCONFIRMED_ENCRYPTION") == "true", SMTPHost: os.Getenv("SMTP_HOST"), SMTPPort: env("SMTP_PORT", "1025"), SMTPFrom: os.Getenv("SMTP_FROM"), SMTPUser: os.Getenv("SMTP_USERNAME"), SMTPPass: os.Getenv("SMTP_PASSWORD"), SMTPRequireTLS: env("SMTP_REQUIRE_TLS", "true") == "true", SMTPTLSMode: resolveSMTPTLSMode(os.Getenv("SMTP_TLS_MODE"), env("SMTP_PORT", "1025")), MaxUpload: maxBytes, MaxOrgBytes: orgBytes, MaxRequestBytes: requestBytes, ClientLimit: limit, Location: loc, AIReview: os.Getenv("AI_REVIEW_ENABLED") == "true", DoclingURL: os.Getenv("DOCLING_URL"), DoclingKey: os.Getenv("DOCLING_API_KEY"), DoclingLang: env("DOCLING_OCR_LANG", "pt"), PaddleURL: os.Getenv("PADDLEOCR_URL"), JevURL: env("TYPESAFE_API_URL", "https://api.typesafe.ai"), JevKey: os.Getenv("TYPESAFE_API_KEY"), JevModel: env("TYPESAFE_MODEL", "jev-latest"), AIMaxChars: aiChars, AIApprove: aiApprove, AIReject: aiReject, DemoTTL: time.Duration(demoHours) * time.Hour, UnverifiedTTL: time.Duration(unverifiedHours) * time.Hour, DemoMaxActive: demoMax, DemoRateHourly: demoRate}
 	if c.Env != "development" && c.Env != "production" && c.Env != "test" {
 		return c, errors.New("APP_ENV must be development or production")
 	}
@@ -215,6 +259,20 @@ func LoadConfig() (Config, error) {
 	}
 	if c.MaxOrgBytes < 1 || c.MaxRequestBytes < 1 || c.MaxRequestBytes > c.MaxOrgBytes || c.MaxUpload < 1 || c.MaxUpload > 50<<20 || c.ClientLimit < 1 {
 		return c, errors.New("invalid upload/client limit")
+	}
+	if c.SMTPTLSMode != smtpTLSStartTLS && c.SMTPTLSMode != smtpTLSImplicit {
+		return c, errors.New("SMTP_TLS_MODE must be " + smtpTLSStartTLS + " or " + smtpTLSImplicit)
+	}
+	if c.DemoTTL < time.Hour || c.DemoTTL > 720*time.Hour || c.UnverifiedTTL < time.Hour || c.UnverifiedTTL > 8760*time.Hour || c.DemoMaxActive < 1 || c.DemoRateHourly < 1 || c.DemoRateHourly > 600 {
+		return c, errors.New("DEMO_TTL_HOURS 1-720, UNVERIFIED_TTL_HOURS 1-8760, DEMO_MAX_ACTIVE and DEMO_RATE_PER_HOUR must be positive")
+	}
+	// An unconfirmed registration is only worth gating when there is a way to
+	// send the confirmation. Production is already required to have SMTP
+	// above, so this is on wherever it can be, and off only on a development
+	// machine with no mail server.
+	c.VerifyEmail = c.SMTPHost != "" && c.SMTPFrom != ""
+	if c.Env == "production" && !c.VerifyEmail {
+		return c, errors.New("production requires SMTP so new accounts can confirm their e-mail")
 	}
 	return c, nil
 }

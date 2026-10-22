@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"golang.org/x/crypto/argon2"
+	"log"
 	"net/http"
 	"net/mail"
 	"strings"
@@ -75,12 +76,112 @@ func (a *App) register(c *call) (any, error) {
 		}
 	}
 	o := domain.Organization{ID: domain.ID(), Name: strings.TrimSpace(input.OrganizationName), ClientLimit: a.Config.ClientLimit, Plan: "founder_pilot", AIReview: domain.AIReviewSuggest, RetentionDays: 365, ReminderDays: []int{3, 6}, RemindersEnabled: true, CreatedAt: domain.Now()}
-	u := domain.User{ID: domain.ID(), OrgID: o.ID, Name: strings.TrimSpace(input.Name), Email: input.Email, StoredHash: passwordHash(input.Password), CreatedAt: domain.Now()}
+	u := domain.User{ID: domain.ID(), OrgID: o.ID, Name: strings.TrimSpace(input.Name), Email: input.Email, StoredHash: passwordHash(input.Password), EmailPending: a.Config.VerifyEmail, CreatedAt: domain.Now()}
+	if !u.EmailPending {
+		u.EmailVerifiedAt = domain.Now()
+	}
 	c.S.Organizations[o.ID] = o
 	c.S.Users[u.ID] = u
 	starterTemplates(c.S, o.ID)
 	c.S.Audit(o.ID, u.ID, "organization.registered", o.ID)
+	// Without SMTP there is no way to confirm an address, which only happens
+	// on a development machine: the workspace opens immediately, exactly as it
+	// did before confirmation existed.
+	if !u.EmailPending {
+		return c.newSession(u), nil
+	}
+	a.issueVerification(c, u)
+	return map[string]any{"status": "verification_sent", "email": u.Email}, nil
+}
+
+// issueVerification replaces any outstanding link for the user and sends a new
+// one after the transaction commits. A send that fails is recorded and left
+// for the person to retry from the sign-in screen: the account already exists,
+// so failing the request here would report a registration that did happen as
+// if it had not.
+func (a *App) issueVerification(c *call, u domain.User) {
+	for h, v := range c.S.Verifications {
+		if v.UserID == u.ID && !v.Used {
+			v.Used = true
+			c.S.Verifications[h] = v
+		}
+	}
+	raw := token()
+	v := domain.EmailVerification{Hash: hash(raw), UserID: u.ID, Email: u.Email, ExpiresAt: time.Now().Add(24 * time.Hour).UTC().Format(time.RFC3339), SentAt: domain.Now()}
+	c.S.Verifications[v.Hash] = v
+	to, org := u.Email, u.OrgID
+	c.effects = append(c.effects, func() error {
+		body := "Confirme seu e-mail para ativar o acesso do seu escritório no DocPing.\n\nUse este link em até 24 horas: " + a.Config.Origin + "/confirmar-email?token=" + raw + "\n\nSe não foi você que criou a conta, ignore esta mensagem: sem a confirmação, o espaço é apagado automaticamente.\n"
+		if err := a.sendEmail(to, "Confirme seu e-mail — DocPing", body); err != nil {
+			log.Printf("verification e-mail not sent: %v", err)
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			_ = a.Store.Run(ctx, true, func(s *domain.State) error {
+				s.Audit(org, u.ID, "auth.verification_failed", u.ID)
+				return nil
+			})
+		}
+		return nil
+	})
+}
+
+// verifyEmail confirms the address and opens the session, so the link the
+// person just clicked lands them inside the workspace.
+func (a *App) verifyEmail(c *call) (any, error) {
+	var input struct{ Token string }
+	if err := decode(c.R, &input); err != nil {
+		return nil, err
+	}
+	expiredLink := fail(410, "verification_expired", "Este link de confirmação expirou. Peça um novo na tela de entrada.")
+	v, ok := c.S.Verifications[hash(input.Token)]
+	if !ok || v.Used || expired(v.ExpiresAt) {
+		return nil, expiredLink
+	}
+	u, ok := c.S.Users[v.UserID]
+	// The address is part of the token: a link issued for an e-mail the
+	// account no longer uses confirms nothing.
+	if !ok || u.Email != v.Email {
+		return nil, expiredLink
+	}
+	v.Used = true
+	c.S.Verifications[v.Hash] = v
+	if u.EmailPending {
+		u.EmailPending = false
+		u.EmailVerifiedAt = domain.Now()
+		c.S.Users[u.ID] = u
+		c.S.Audit(u.OrgID, u.ID, "auth.email_verified", u.ID)
+	}
 	return c.newSession(u), nil
+}
+
+// resendVerification answers the same way whether or not the account exists,
+// so the endpoint cannot be used to find out who has an account.
+func (a *App) resendVerification(c *call) (any, error) {
+	var input struct{ Email string }
+	if err := decode(c.R, &input); err != nil {
+		return nil, err
+	}
+	neutral := map[string]string{"message": "Se houver uma conta aguardando confirmação, enviaremos um novo link."}
+	email := strings.ToLower(strings.TrimSpace(input.Email))
+	if !validEmail(email) {
+		return neutral, nil
+	}
+	for _, u := range c.S.Users {
+		if u.Email != email || !u.EmailPending {
+			continue
+		}
+		for _, v := range c.S.Verifications {
+			sent, err := time.Parse(time.RFC3339, v.SentAt)
+			// Two minutes between links: a resend button held down must not
+			// turn into a mail flood aimed at the address.
+			if v.UserID == u.ID && err == nil && time.Since(sent) < 2*time.Minute {
+				return neutral, nil
+			}
+		}
+		a.issueVerification(c, u)
+		break
+	}
+	return neutral, nil
 }
 func (a *App) login(c *call) (any, error) {
 	var input struct{ Email, Password string }
@@ -101,6 +202,11 @@ func (a *App) login(c *call) (any, error) {
 	if !passwordOK(input.Password, user.StoredHash) {
 		return nil, fail(401, "invalid_credentials", "E-mail ou senha incorretos.")
 	}
+	// Checked only after the password matched, so the response never reveals
+	// the state of an account to someone who does not hold its credentials.
+	if user.EmailPending {
+		return nil, fail(403, "email_unverified", "Confirme seu e-mail para entrar. Podemos enviar um novo link de confirmação.")
+	}
 	c.S.Audit(user.OrgID, user.ID, "auth.login", user.ID)
 	return c.newSession(user), nil
 }
@@ -112,6 +218,19 @@ func (a *App) logout(c *call) (any, error) {
 	return nil, nil
 }
 func (a *App) demo(c *call) (any, error) {
+	// Each demonstration is a real organization with sample clients and
+	// requests, so an unbounded number of them is an unbounded amount of
+	// state. The per-IP rate limit slows one source down; this ceiling is what
+	// holds when the requests come from many.
+	live := 0
+	for _, org := range c.S.Organizations {
+		if org.Demo {
+			live++
+		}
+	}
+	if live >= a.Config.DemoMaxActive {
+		return nil, fail(503, "demo_unavailable", "A demonstração está com todas as vagas ocupadas neste momento. Tente novamente mais tarde.")
+	}
 	o := domain.Organization{ID: domain.ID(), Name: "Aurora Contabilidade", Demo: true, ClientLimit: 30, Plan: "demo", AIReview: domain.AIReviewAuto, RetentionDays: 365, ReminderDays: []int{3, 6}, RemindersEnabled: false, CreatedAt: domain.Now()}
 	u := domain.User{ID: domain.ID(), OrgID: o.ID, Name: "Mariana", Email: "demo-" + o.ID + "@example.invalid", CreatedAt: domain.Now()}
 	c.S.Organizations[o.ID] = o
@@ -236,6 +355,14 @@ func (a *App) resetPassword(c *call) (any, error) {
 		return nil, fail(410, "reset_expired", "O link de recuperação expirou.")
 	}
 	u.StoredHash = passwordHash(input.Password)
+	// Receiving the reset link proves control of the address just as the
+	// confirmation link does, so it also lifts the pending state instead of
+	// leaving the account with a new password it still cannot sign in with.
+	if u.EmailPending {
+		u.EmailPending = false
+		u.EmailVerifiedAt = domain.Now()
+		c.S.Audit(u.OrgID, u.ID, "auth.email_verified", u.ID)
+	}
 	c.S.Users[u.ID] = u
 	r.Used = true
 	c.S.Resets[r.Hash] = r

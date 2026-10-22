@@ -23,6 +23,13 @@ func messageIDDomain(from string) string {
 	}
 	return "docping.invalid"
 }
+
+// smtpTLSConfig verifies the provider's certificate against the system roots
+// and the configured hostname. A test may supply its own pool; nothing else
+// ever does, and verification is never skipped.
+func (a *App) smtpTLSConfig() *tls.Config {
+	return &tls.Config{ServerName: a.Config.SMTPHost, MinVersion: tls.VersionTLS12, RootCAs: a.Config.smtpRoots}
+}
 func (a *App) sendEmail(to, subject, body string) error {
 	if a.Config.SMTPHost == "" || a.Config.SMTPFrom == "" {
 		return errors.New("e-mail não configurado")
@@ -31,8 +38,17 @@ func (a *App) sendEmail(to, subject, body string) error {
 		return errors.New("destinatário inválido")
 	}
 	addr := net.JoinHostPort(a.Config.SMTPHost, a.Config.SMTPPort)
-	conn, err := net.DialTimeout("tcp", addr, 10*time.Second)
-	if err != nil {
+	implicit := a.Config.SMTPTLSMode == smtpTLSImplicit
+	var conn net.Conn
+	var err error
+	if implicit {
+		// The port answers in TLS, so the handshake comes before the SMTP
+		// greeting. There is no plaintext phase to fall back to.
+		conn, err = tls.DialWithDialer(&net.Dialer{Timeout: 10 * time.Second}, "tcp", addr, a.smtpTLSConfig())
+		if err != nil {
+			return errors.New("falha na conexão TLS de e-mail")
+		}
+	} else if conn, err = net.DialTimeout("tcp", addr, 10*time.Second); err != nil {
 		return errors.New("provedor de e-mail indisponível")
 	}
 	defer conn.Close()
@@ -42,12 +58,14 @@ func (a *App) sendEmail(to, subject, body string) error {
 		return errors.New("provedor de e-mail indisponível")
 	}
 	defer client.Close()
-	if ok, _ := client.Extension("STARTTLS"); ok {
-		if err = client.StartTLS(&tls.Config{ServerName: a.Config.SMTPHost, MinVersion: tls.VersionTLS12}); err != nil {
-			return errors.New("falha na conexão TLS de e-mail")
+	if !implicit {
+		if ok, _ := client.Extension("STARTTLS"); ok {
+			if err = client.StartTLS(a.smtpTLSConfig()); err != nil {
+				return errors.New("falha na conexão TLS de e-mail")
+			}
+		} else if a.Config.SMTPRequireTLS {
+			return errors.New("o provedor precisa oferecer TLS")
 		}
-	} else if a.Config.SMTPRequireTLS {
-		return errors.New("o provedor precisa oferecer TLS")
 	}
 	if a.Config.SMTPUser != "" {
 		if err = client.Auth(smtp.PlainAuth("", a.Config.SMTPUser, a.Config.SMTPPass, a.Config.SMTPHost)); err != nil {
