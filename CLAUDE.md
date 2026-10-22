@@ -83,6 +83,14 @@ into memory for the duration of a transaction, let the handler mutate it, write 
 - `STORE_DRIVER=json` (development only, enforced): atomic temp-file+rename write to
   `apps/api/.data/state.json`, objects under `apps/api/.data/objects/`.
 
+`save` is upsert-only, so dropping an entity from the in-memory state does not
+delete it — the next load brings it back. Deletion therefore does not go through
+`Run`: `Store.PurgeOrganizations` issues real `DELETE`s child-first (the schema
+has no `ON DELETE CASCADE`, so `purgeOrder` is load-bearing). It is the only
+deletion path, used by the cleanup job in `internal/app/cleanup.go` that expires
+demo and unconfirmed organizations; bucket objects are deleted by the caller
+first, because afterwards nothing records which objects were theirs.
+
 This whole-state load is a deliberate, documented first iteration — see the "Desvio
 conhecido" section in `docs/02-arquitetura-e-dados.md`. Scoped SQL queries must replace it
 before scale; do not add features that depend on loading all state.
@@ -126,13 +134,38 @@ transaction that stores — and in `auto` mode applies — the verdict.
 - Thresholds are configuration and are uncalibrated. Do not present `auto` as validated;
   see `docs/06-validacao-da-entrega.md`.
 
+### Account creation is rate-limited and confirmed
+
+Both routes that create an organization without anyone paying or proving
+anything are bounded, because an unbounded number of them is an unbounded
+amount of state in a store that loads all of it per transaction.
+
+- `register` does **not** return a session. It answers
+  `{status:"verification_sent",email}` and mails a single-use 24h link;
+  `verify-email` confirms the address and opens the session. `login` returns
+  `403 email_unverified`, checked only after the password matched so the
+  response never reveals an account's state to someone without its credentials.
+  `User.EmailPending` gates this and its zero value means "not pending", so
+  accounts stored before the field keep working with no data migration.
+- `Config.VerifyEmail` is derived from SMTP being configured, never set by
+  hand: production already requires SMTP, and a development machine without it
+  must stay usable — there, registration opens the workspace as it did before.
+- `/api/auth/demo` has its own hourly rate-limit group and a ceiling on live
+  demonstrations. Expiry (`DEMO_TTL_HOURS`, `UNVERIFIED_TTL_HOURS`) is what
+  keeps them from accumulating; a confirmed workspace is never collected.
+
 ### Config is the safety boundary
 
 `internal/app/config.go` refuses to start when `APP_ENV=production` lacks HTTPS origin,
 verified-TLS MySQL, private S3, ClamAV or TLS SMTP, or when any development bypass is
-set. Verified TLS means `tls=true` against the system roots, or `tls=docping-ca` with a
+set. `SMTP_TLS_MODE` picks how the mail connection reaches TLS — `starttls` (port 587)
+or `implicit` (port 465, TLS before the greeting, which is what Hostinger recommends);
+blank means the port decides. Both verify the certificate against the system roots and
+the configured hostname, and an unknown mode is refused rather than treated as
+plaintext. Verified TLS means `tls=true` against the system roots, or `tls=docping-ca` with a
 PEM in `MYSQL_CA_CERT` — same chain and hostname check, different trust anchor, and
-refused outright when the CA is missing or unparsable. `tls=skip-verify` stays rejected. It likewise refuses `AI_REVIEW_ENABLED=true` without `TYPESAFE_API_KEY`, without an
+refused outright when the CA is missing or unparsable. `tls=skip-verify` stays rejected. It also refuses to start in production without SMTP, since a new account could
+then never confirm its address. It likewise refuses `AI_REVIEW_ENABLED=true` without `TYPESAFE_API_KEY`, without an
 extractor URL, with a non-HTTPS TypeSafe endpoint, or with a confidence threshold outside
 0.5–1 — a threshold a typo turned into zero would approve every document. There is no
 automatic fallback from MySQL to JSON. Preserve this: new capabilities that weaken

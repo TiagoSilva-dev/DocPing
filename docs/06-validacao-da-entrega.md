@@ -134,7 +134,9 @@ Os três caminhos do fluxo se comportaram como projetado, incluindo a escalada: 
 
 `Organization.RetentionDays` é validado (30 a 3650 dias), persistido e editável em
 Configurações, **mas nenhum job o aplica**. Não existe expurgo de documentos vencidos:
-as únicas chamadas a `Objects.Delete` removem objetos órfãos quando um upload falha.
+as chamadas a `Objects.Delete` removem objetos órfãos quando um upload falha e os
+objetos das organizações que o job de limpeza expira (demonstrações e cadastros não
+confirmados) — nenhuma delas olha o prazo de retenção.
 
 Na prática, hoje o ajuste não produz efeito algum. Isso tem duas consequências:
 
@@ -147,3 +149,85 @@ Na prática, hoje o ajuste não produz efeito algum. Isso tem duas consequência
 Implementar o expurgo exige decidir o que acontece com solicitações concluídas, se o
 registro de auditoria sobrevive ao documento e se o escritório é avisado antes. Até lá,
 trate a retenção como declaração de intenção, não como garantia.
+
+## Mudança posterior: limites de criação de conta (21/10/2026)
+
+Não coberta pelos 18 cenários acima. Removida também a promessa de teste gratuito da
+landing e da tela de cadastro, por decisão de produto: não haverá teste gratuito.
+
+**O que foi verificado nesta rodada**
+
+| Verificação | Resultado | Alcance |
+|---|---|---|
+| `go build ./... && go vet ./...` | Passou | Toda a API |
+| `go test ./...` | Passou | Suíte completa, incluindo os seis testes novos |
+| `go test -race ./...` | Passou, sem corrida reportada | Mesma suíte |
+| `npm run check` e `npm test` | Passaram (14 testes) | TypeScript e lógica pura do frontend |
+| `npm run build` | Passou | Empacotamento com a rota `/confirmar-email` |
+
+Os testes novos cobrem: teto de demonstrações vivas com liberação de vaga após a
+expiração; orçamento por IP por hora com `Retry-After: 3600`; expiração de uma
+demonstração com exclusão de organização, usuário, clientes e solicitações, e a sessão
+deixando de autenticar; cadastro que não abre sessão, login recusado com
+`email_unverified`, confirmação pelo link abrindo a sessão, link de uso único e login
+liberado depois; expurgo do cadastro nunca confirmado com preservação do confirmado de
+mesma idade; e reenvio com intervalo mínimo e resposta idêntica para e-mail sem conta.
+A confirmação de e-mail é exercitada ponta a ponta contra um servidor SMTP falso em
+processo, lendo o link da mensagem entregue.
+
+**Não validado**
+
+1. Nenhum e-mail de confirmação foi entregue por um provedor real — só pelo SMTP falso
+   dos testes. O corpo, o assunto e a chegada à caixa de entrada (SPF/DKIM, spam) seguem
+   sem verificação.
+2. As telas novas (aguardando confirmação, `/confirmar-email`) **não foram vistas em
+   navegador**, como todo o restante da interface nesta entrega.
+3. O job de limpeza nunca rodou em processo de longa duração: nos testes ele é chamado
+   diretamente, não pelo `StartWorker`.
+
+## Mudança posterior: MySQL real e SMTP da Hostinger (21/10/2026)
+
+**Ordem de exclusão, confirmada em MySQL real.** O que o registro anterior listava como
+não executado foi executado: um MySQL 8.0.46 descartável em container, banco criado só
+para a rodada e removido depois.
+
+| Verificação | Resultado |
+|---|---|
+| `MYSQL_TEST_DSN=… go test ./internal/persistence -run MySQL -v` | `TestMySQLRoundTrip` e `TestMySQLPurgeRespectsForeignKeys` passaram |
+
+A migração `002_email_verification.sql` foi aplicada nessa rodada, pelo caminho normal de
+inicialização do `Open`. A ordem dos `DELETE` de `purgeOrder` está agora **observada**
+contra as chaves estrangeiras reais, não apenas derivada do schema.
+
+**SMTP com TLS implícito (porta 465).** O transporte só sabia elevar uma conexão em texto
+claro com STARTTLS. A porta recomendada pela Hostinger responde em TLS antes do greeting,
+e nela o código anterior não conseguiria sequer ler a saudação. `SMTP_TLS_MODE` passou a
+escolher o modo, com a porta como padrão.
+
+| Verificação | Resultado | Alcance |
+|---|---|---|
+| `go test ./internal/app -run "SMTP\|TLSMode\|Hostinger" -v` | Passou | Entrega em TLS implícito contra servidor TLS local; recusa de queda para texto claro; recusa de certificado não confiável; resolução do modo por porta; `LoadConfig` com a forma Hostinger nas portas 465 e 587 e recusa de modo inválido |
+| Sondagem do servidor real `smtp.hostinger.com`, portas 465 e 587 | TLS 1.3, `CN=hostinger.com`, verificação OK pelas raízes do sistema, `AUTH PLAIN LOGIN`, `SIZE 48811212` | Handshake e EHLO pelo mesmo caminho de código do produto, **sem credenciais e sem enviar mensagem** |
+| `go test -race ./...` e `go test ./...` | Passaram | Suíte completa |
+
+**Envio real, executado em 21/10/2026.** `TestHostingerSMTPLive` (opt-in, lê a senha de
+um arquivo) enviou uma mensagem por `smtp.hostinger.com:465` em modo `implicit`,
+autenticando como a caixa e com um **alias** no remetente. O provedor autenticou e
+aceitou a mensagem (`250` após `DATA`). Isso prova as credenciais, o TLS implícito ponta
+a ponta e que a Hostinger aceita alias como remetente de uma caixa autenticada.
+
+**Não validado**
+
+1. A **chegada à caixa de entrada** não foi conferida por este registro: a aceitação pelo
+   provedor não é entrega. O cabeçalho recebido — remetente efetivo, resultado de SPF,
+   DKIM e DMARC do domínio — precisa ser lido na caixa de destino.
+2. Nenhuma mensagem do produto em si foi enviada pela Hostinger: o teste chama
+   `sendEmail` diretamente. Os e-mails de confirmação de cadastro e de lembrete nunca
+   passaram por um provedor real.
+3. A API HTTP de e-mail da Hostinger (`api.mail.hostinger.com`) **não foi implementada**,
+   e a decisão agora tem base verificada contra a API real: o token é escopado a uma
+   caixa, o envio é por `resourceId` de caixa e não existe campo de remetente no schema,
+   então um alias não pode ser o remetente — alias não é caixa. Além disso cada envio é
+   copiado para `INBOX.Sent` da caixa. O motivo está em `infra/README.md`.
+4. O envio real pela Hostinger depende do teste opt-in `TestHostingerSMTPLive`, que
+   **ainda não foi executado**: exige a senha da caixa, que não está nesta máquina.

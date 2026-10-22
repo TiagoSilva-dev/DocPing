@@ -18,6 +18,8 @@ Estado desta lista: **pendente de homologação no ambiente de piloto**. Existem
 |---|---|---|
 | HTTPS e cookies | TLS válido; redirecionamento; HttpOnly, Secure, SameSite; sem conteúdo misto; CORS/origin/CSRF validados | Bloqueia piloto |
 | Credenciais | Argon2id parametrizado; recuperação com expiração e uso único; rate limit; logout/revogação testados | Bloqueia piloto |
+| Criação de conta | Cadastro não abre sessão: exige confirmação do e-mail, com link de uso único de 24h, reenvio neutro e intervalo mínimo; login responde `email_unverified` só depois de a senha conferir | Produção recusa iniciar sem SMTP, então a confirmação não pode ser desligada |
+| Demonstração | Teto de demonstrações vivas, orçamento por IP por hora e expiração automática com exclusão integral (estado e objetos) | Era o caminho mais aberto: cria organização real sem e-mail nem senha |
 | Isolamento | Duas organizações testadas em todas as rotas e downloads; vínculos filhos não cruzam escritórios | Bloqueia piloto |
 | Portal | Hash de token, entropia, expiração, revogação, rate limit; código adicional para sensíveis | Bloqueia piloto |
 | Arquivos privados | Bucket sem leitura pública, chaves opacas, autorização antes de bytes/URL curta, nenhum segredo no browser | Bloqueia piloto |

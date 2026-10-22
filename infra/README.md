@@ -67,6 +67,29 @@ JSON/local não valida SQL, transações, concorrência, bucket S3, scanner ou e
 
 ## Configuração de produção
 
+### SMTP de produção (Hostinger)
+
+O transporte alcança TLS de dois modos, escolhidos por `SMTP_TLS_MODE`: `starttls` eleva uma conexão em texto claro (porta 587, a maioria dos provedores) e `implicit` fala TLS desde o primeiro byte (porta 465, a recomendada pela Hostinger). Em branco, a porta decide — 465 é `implicit`. Ler o greeting de uma porta de TLS implícito por socket comum nunca funciona, e é por isso que o modo é configuração e não descoberta. Nos dois modos o certificado é verificado contra as raízes do sistema e o hostname configurado; não existe opção de ignorar a verificação.
+
+Para a Hostinger: `SMTP_HOST=smtp.hostinger.com`, `SMTP_PORT=465`, `SMTP_TLS_MODE=implicit`, `SMTP_USERNAME` com o **endereço completo** da caixa, `SMTP_PASSWORD` com a senha **da caixa** (não a do painel) e `SMTP_FROM` igual à caixa autenticada ou a um alias dela — um remetente diferente é recusado pelo provedor, e o erro aparece como `remetente recusado pelo provedor` na entrega. Verificado em 21/10/2026 contra o servidor real, sem credenciais: as portas 465 e 587 respondem em TLS 1.3 com certificado válido (`CN=hostinger.com`, verificação OK) e anunciam `AUTH PLAIN LOGIN`, que é o mecanismo usado pelo cliente. O limite anunciado é de 48,8 MB por mensagem; as mensagens do DocPing são texto com um link, nunca anexos.
+
+`SMTP_FROM` é independente de `SMTP_USERNAME`: autentique com o endereço da caixa e use o alias como remetente — por exemplo `SMTP_USERNAME=tiago@docping.com.br` com `SMTP_FROM=notificacao@docping.com.br`. É assim que as notificações saem de um endereço de produto, e não de um endereço pessoal.
+
+Para enviar **uma** mensagem real e conferir o caminho completo, existe um teste opt-in que lê a senha de um arquivo, para o segredo não passar por linha de comando:
+
+```sh
+printf '%s' '<senha da caixa>' > ~/.docping-smtp-pass && chmod 600 ~/.docping-smtp-pass
+cd apps/api && SMTP_LIVE_TO=<seu endereço> SMTP_LIVE_USERNAME=<caixa> \
+  SMTP_LIVE_FROM=<alias> SMTP_LIVE_PASSWORD_FILE=~/.docping-smtp-pass \
+  go test ./internal/app -run HostingerSMTPLive -v
+```
+
+### Por que não a Mail API da Hostinger
+
+A Hostinger também oferece uma API HTTP (`api.mail.hostinger.com`, do Agentic Mail). Ela **não** é usada, por três motivos verificados em 21/10/2026 contra a API real: o token é escopado a uma caixa específica e o envio é `POST /api/v1/mailboxes/{resourceId}/send`, sem campo de remetente no schema — então um **alias não pode ser o remetente**, porque alias não é caixa e não tem `resourceId`; cada mensagem enviada é copiada para `INBOX.Sent` da caixa, o que com volume transacional enche uma caixa de pessoa; e o corpo documentado é apenas texto. O `resourceId` de uma caixa, se precisar dele algum dia, vem de `GET /api/v1/me` com o token.
+
+Não foi enviada nenhuma mensagem real na verificação de handshake: credenciais, aceitação do alias como remetente, entrega na caixa de entrada e reputação (SPF, DKIM, DMARC do domínio) dependem do teste opt-in acima.
+
 Separar secrets do repositório, `APP_ENV=production`, `STORE_DRIVER=mysql`, DSN com TLS, origem HTTPS, bucket privado com criptografia, credencial de mínimo privilégio, scanner atualizado e provedor SMTP autenticado com transporte seguro. O modo JSON, storage local e aceite de arquivo não verificado devem ser recusados na inicialização de produção. TLS/CSRF, backups, retenção, alertas e teste de recuperação são requisitos adicionais; este Compose não os fornece.
 
 Não publicar portas de MySQL, console S3, Mailpit ou ClamAV. Um proxy HTTPS pode servir aplicação e API na mesma origem; sem microserviços nem fila adicional. Monólito e jobs devem continuar idempotentes ao reiniciar.
