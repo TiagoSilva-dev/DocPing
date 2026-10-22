@@ -31,6 +31,21 @@ func messageIDDomain(from string) string {
 func (a *App) smtpTLSConfig() *tls.Config {
 	return &tls.Config{ServerName: a.Config.SMTPHost, MinVersion: tls.VersionTLS12, RootCAs: a.Config.smtpRoots}
 }
+
+// smtpFailure keeps the two audiences apart. The customer and the delivery
+// record get the short Portuguese sentence they can act on; the server log
+// gets the provider's actual complaint, which is the only thing that tells a
+// blocked port apart from a rejected certificate or a refused sender. Saying
+// only the friendly sentence turned a platform that silently blocks outbound
+// SMTP into a mystery, so the real cause is written down now.
+//
+// The underlying error never carries the password: it is the transport's own
+// message, or the server's reply to a command.
+func (a *App) smtpFailure(stage, friendly string, err error) error {
+	log.Printf("smtp %s failed (%s, mode %s): %v", stage, net.JoinHostPort(a.Config.SMTPHost, a.Config.SMTPPort), a.Config.SMTPTLSMode, err)
+	return errors.New(friendly)
+}
+
 func (a *App) sendEmail(to, subject, body string) error {
 	if a.Config.SMTPHost == "" || a.Config.SMTPFrom == "" {
 		return errors.New("e-mail não configurado")
@@ -47,22 +62,22 @@ func (a *App) sendEmail(to, subject, body string) error {
 		// greeting. There is no plaintext phase to fall back to.
 		conn, err = tls.DialWithDialer(&net.Dialer{Timeout: 10 * time.Second}, "tcp", addr, a.smtpTLSConfig())
 		if err != nil {
-			return errors.New("falha na conexão TLS de e-mail")
+			return a.smtpFailure("implicit TLS dial", "falha na conexão TLS de e-mail", err)
 		}
 	} else if conn, err = net.DialTimeout("tcp", addr, 10*time.Second); err != nil {
-		return errors.New("provedor de e-mail indisponível")
+		return a.smtpFailure("dial", "provedor de e-mail indisponível", err)
 	}
 	defer conn.Close()
 	_ = conn.SetDeadline(time.Now().Add(20 * time.Second))
 	client, err := smtp.NewClient(conn, a.Config.SMTPHost)
 	if err != nil {
-		return errors.New("provedor de e-mail indisponível")
+		return a.smtpFailure("greeting", "provedor de e-mail indisponível", err)
 	}
 	defer client.Close()
 	if !implicit {
 		if ok, _ := client.Extension("STARTTLS"); ok {
 			if err = client.StartTLS(a.smtpTLSConfig()); err != nil {
-				return errors.New("falha na conexão TLS de e-mail")
+				return a.smtpFailure("starttls", "falha na conexão TLS de e-mail", err)
 			}
 		} else if a.Config.SMTPRequireTLS {
 			return errors.New("o provedor precisa oferecer TLS")
@@ -70,25 +85,25 @@ func (a *App) sendEmail(to, subject, body string) error {
 	}
 	if a.Config.SMTPUser != "" {
 		if err = client.Auth(smtp.PlainAuth("", a.Config.SMTPUser, a.Config.SMTPPass, a.Config.SMTPHost)); err != nil {
-			return errors.New("autenticação do provedor de e-mail falhou")
+			return a.smtpFailure("auth", "autenticação do provedor de e-mail falhou", err)
 		}
 	}
 	if err = client.Mail(a.Config.SMTPFrom); err != nil {
-		return errors.New("remetente recusado pelo provedor")
+		return a.smtpFailure("sender", "remetente recusado pelo provedor", err)
 	}
 	if err = client.Rcpt(to); err != nil {
-		return errors.New("destinatário recusado pelo provedor")
+		return a.smtpFailure("recipient", "destinatário recusado pelo provedor", err)
 	}
 	data, err := client.Data()
 	if err != nil {
-		return errors.New("provedor recusou a mensagem")
+		return a.smtpFailure("data", "provedor recusou a mensagem", err)
 	}
 	message := "From: " + a.Config.SMTPFrom + "\r\nTo: " + to + "\r\nSubject: " + mime.QEncoding.Encode("utf-8", subject) + "\r\nDate: " + time.Now().Format(time.RFC1123Z) + "\r\nMessage-ID: <" + domain.ID() + "@" + messageIDDomain(a.Config.SMTPFrom) + ">\r\nAuto-Submitted: auto-generated\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n" + body + "\r\n"
 	if _, err = data.Write([]byte(message)); err != nil {
-		return errors.New("falha no envio ao provedor")
+		return a.smtpFailure("write", "falha no envio ao provedor", err)
 	}
 	if err = data.Close(); err != nil {
-		return errors.New("provedor não confirmou o recebimento")
+		return a.smtpFailure("commit", "provedor não confirmou o recebimento", err)
 	}
 	_ = client.Quit()
 	return nil
