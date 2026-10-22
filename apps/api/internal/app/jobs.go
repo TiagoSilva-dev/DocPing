@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"mime"
+	"mime/quotedprintable"
 	"net"
 	"net/smtp"
 	"strings"
@@ -50,7 +51,16 @@ func (a *App) smtpFailure(stage, friendly string, err error) error {
 // HTTPS wins when it is configured: it is the one that works everywhere,
 // including on a platform that blocks the SMTP port outright. SMTP stays for
 // the local stack, where Mailpit is the whole point.
+// sendEmail delivers a text-only message. Notices that are a sentence and
+// nothing else still use it.
 func (a *App) sendEmail(to, subject, body string) error {
+	return a.sendEmailHTML(to, subject, body, "")
+}
+
+// sendEmailHTML delivers a message with both parts. The text is never
+// optional: a message with no text alternative reads as suspect to a filter,
+// and some people read everything as text on purpose.
+func (a *App) sendEmailHTML(to, subject, body, htmlBody string) error {
 	if !a.Config.CanSendEmail() {
 		return errors.New("e-mail não configurado")
 	}
@@ -60,7 +70,7 @@ func (a *App) sendEmail(to, subject, body string) error {
 	if a.Mail != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		if err := a.Mail.Send(ctx, a.Config.Sender(), to, subject, body); err != nil {
+		if err := a.Mail.Send(ctx, a.Config.Sender(), to, subject, body, htmlBody); err != nil {
 			// The provider's own words go to the log; the customer and the
 			// delivery record get the sentence they can act on.
 			log.Printf("resend send failed (from %s): %v", a.Config.Sender(), err)
@@ -68,10 +78,10 @@ func (a *App) sendEmail(to, subject, body string) error {
 		}
 		return nil
 	}
-	return a.sendSMTP(to, subject, body)
+	return a.sendSMTP(to, subject, body, htmlBody)
 }
 
-func (a *App) sendSMTP(to, subject, body string) error {
+func (a *App) sendSMTP(to, subject, body, htmlBody string) error {
 	addr := net.JoinHostPort(a.Config.SMTPHost, a.Config.SMTPPort)
 	implicit := a.Config.SMTPTLSMode == smtpTLSImplicit
 	var conn net.Conn
@@ -117,7 +127,7 @@ func (a *App) sendSMTP(to, subject, body string) error {
 	if err != nil {
 		return a.smtpFailure("data", "provedor recusou a mensagem", err)
 	}
-	message := "From: " + a.Config.Sender() + "\r\nTo: " + to + "\r\nSubject: " + mime.QEncoding.Encode("utf-8", subject) + "\r\nDate: " + time.Now().Format(time.RFC1123Z) + "\r\nMessage-ID: <" + domain.ID() + "@" + messageIDDomain(a.Config.Sender()) + ">\r\nAuto-Submitted: auto-generated\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n" + body + "\r\n"
+	message := a.mimeMessage(to, subject, body, htmlBody)
 	if _, err = data.Write([]byte(message)); err != nil {
 		return a.smtpFailure("write", "falha no envio ao provedor", err)
 	}
@@ -364,4 +374,32 @@ func (a *App) tick(ctx context.Context, now time.Time) {
 			_ = effect()
 		}
 	}
+}
+
+// mimeMessage builds the message itself. With an html part it is
+// multipart/alternative: the client picks, and a text-only reader still gets
+// a readable message.
+//
+// The html part is quoted-printable because its lines are long and SMTP caps
+// a line at a thousand characters. Breaking them by hand would break them
+// inside attributes; quoted-printable inserts soft breaks the receiver undoes.
+func (a *App) mimeMessage(to, subject, body, htmlBody string) string {
+	headers := "From: " + a.Config.Sender() + "\r\nTo: " + to +
+		"\r\nSubject: " + mime.QEncoding.Encode("utf-8", subject) +
+		"\r\nDate: " + time.Now().Format(time.RFC1123Z) +
+		"\r\nMessage-ID: <" + domain.ID() + "@" + messageIDDomain(a.Config.Sender()) + ">" +
+		"\r\nAuto-Submitted: auto-generated\r\nMIME-Version: 1.0\r\n"
+	if htmlBody == "" {
+		return headers + "Content-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n" + body + "\r\n"
+	}
+	// The boundary is random so that it cannot appear inside either part.
+	boundary := "docping-" + domain.ID()
+	var encoded strings.Builder
+	writer := quotedprintable.NewWriter(&encoded)
+	_, _ = writer.Write([]byte(htmlBody))
+	_ = writer.Close()
+	return headers + "Content-Type: multipart/alternative; boundary=\"" + boundary + "\"\r\n\r\n" +
+		"--" + boundary + "\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n" + body + "\r\n" +
+		"--" + boundary + "\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n" + encoded.String() + "\r\n" +
+		"--" + boundary + "--\r\n"
 }

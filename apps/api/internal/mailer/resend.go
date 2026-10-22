@@ -49,16 +49,20 @@ func (e *Error) Error() string {
 	return fmt.Sprintf("resend %d %s: %s", e.Status, e.Name, e.Message)
 }
 
-// Send delivers one plain-text message. The body is text on purpose: every
-// message this product sends is a sentence and a link, and an HTML part would
-// only add a second copy to keep in agreement with the first.
-func (r *Resend) Send(ctx context.Context, from, to, subject, body string) error {
-	payload, err := json.Marshal(map[string]any{
+// Send delivers one message. The text part is always sent, with or without
+// html: a message with no text alternative reads as suspect to a filter, and
+// some people read everything as text on purpose.
+func (r *Resend) Send(ctx context.Context, from, to, subject, text, htmlBody string) error {
+	fields := map[string]any{
 		"from":    from,
 		"to":      []string{to},
 		"subject": subject,
-		"text":    body,
-	})
+		"text":    text,
+	}
+	if htmlBody != "" {
+		fields["html"] = htmlBody
+	}
+	payload, err := json.Marshal(fields)
 	if err != nil {
 		return err
 	}

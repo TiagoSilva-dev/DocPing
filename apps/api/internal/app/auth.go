@@ -144,8 +144,15 @@ func (a *App) issueVerification(c *call, u domain.User) {
 	c.S.Verifications[v.Hash] = v
 	to, org := u.Email, u.OrgID
 	c.effects = append(c.effects, func() error {
-		body := "Confirme seu e-mail para ativar o acesso do seu escritório no DocPing.\n\nUse este link em até 24 horas: " + a.Config.Origin + "/confirmar-email?token=" + raw + "\n\nSe não foi você que criou a conta, ignore esta mensagem: sem a confirmação, o espaço é apagado automaticamente.\n"
-		if err := a.sendEmail(to, "Confirme seu e-mail — DocPing", body); err != nil {
+		link := a.Config.Origin + "/confirmar-email?token=" + raw
+		content := emailContent{
+			Preheader:  "Falta um clique para ativar o acesso do seu escritório.",
+			Heading:    "Confirme seu e-mail",
+			Paragraphs: []string{"Falta um passo para ativar o acesso do seu escritório no DocPing. O link vale por 24 horas e só pode ser usado uma vez."},
+			Action:     &emailAction{Label: "Confirmar meu e-mail", URL: link},
+			Note:       "Se não foi você que criou a conta, ignore esta mensagem: sem a confirmação, o espaço é apagado automaticamente.",
+		}
+		if err := a.sendEmailHTML(to, "Confirme seu e-mail — DocPing", plainEmail(content), a.renderEmail(content)); err != nil {
 			log.Printf("verification e-mail not sent: %v", err)
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()

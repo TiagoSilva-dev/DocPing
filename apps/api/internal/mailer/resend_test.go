@@ -29,7 +29,7 @@ func TestSendPostsTheMessage(t *testing.T) {
 		_ = json.Unmarshal(data, &body)
 		w.Write([]byte(`{"id":"ae2014de-c168-4c61-8267-f689f1d6f1f3"}`))
 	})
-	if err := r.Send(context.Background(), "nao-responda@docping.com.br", "cliente@exemplo.com", "Confirme seu e-mail — DocPing", "Use este link"); err != nil {
+	if err := r.Send(context.Background(), "nao-responda@docping.com.br", "cliente@exemplo.com", "Confirme seu e-mail — DocPing", "Use este link", "<p>Use este link</p>"); err != nil {
 		t.Fatal(err)
 	}
 	if auth != "Bearer re_test_key" || contentType != "application/json" {
@@ -37,6 +37,9 @@ func TestSendPostsTheMessage(t *testing.T) {
 	}
 	if body["from"] != "nao-responda@docping.com.br" || body["subject"] != "Confirme seu e-mail — DocPing" || body["text"] != "Use este link" {
 		t.Fatalf("payload: %+v", body)
+	}
+	if body["html"] != "<p>Use este link</p>" {
+		t.Fatalf("html part missing: %+v", body)
 	}
 	to, ok := body["to"].([]any)
 	if !ok || len(to) != 1 || to[0] != "cliente@exemplo.com" {
@@ -51,7 +54,7 @@ func TestSendReportsTheProvidersRefusal(t *testing.T) {
 		w.WriteHeader(403)
 		w.Write([]byte(`{"name":"validation_error","message":"The docping.com.br domain is not verified."}`))
 	})
-	err := r.Send(context.Background(), "a@b.com", "c@d.com", "x", "y")
+	err := r.Send(context.Background(), "a@b.com", "c@d.com", "x", "y", "")
 	var refusal *Error
 	if !errors.As(err, &refusal) {
 		t.Fatalf("expected a typed refusal: %v", err)
@@ -67,7 +70,7 @@ func TestSendRefusesAnAcknowledgementWithoutAnID(t *testing.T) {
 	r := client(t, func(w http.ResponseWriter, req *http.Request) {
 		w.Write([]byte(`{}`))
 	})
-	if err := r.Send(context.Background(), "a@b.com", "c@d.com", "x", "y"); err == nil {
+	if err := r.Send(context.Background(), "a@b.com", "c@d.com", "x", "y", ""); err == nil {
 		t.Fatal("an empty acknowledgement was taken as sent")
 	}
 }
@@ -84,7 +87,7 @@ func TestSendRetriesOnceOnTheRateLimit(t *testing.T) {
 		}
 		w.Write([]byte(`{"id":"ok"}`))
 	})
-	if err := r.Send(context.Background(), "a@b.com", "c@d.com", "x", "y"); err != nil {
+	if err := r.Send(context.Background(), "a@b.com", "c@d.com", "x", "y", ""); err != nil {
 		t.Fatal(err)
 	}
 	if got := calls.Load(); got != 2 {
@@ -101,7 +104,7 @@ func TestSendDoesNotRetryOtherFailures(t *testing.T) {
 		w.WriteHeader(500)
 		w.Write([]byte(`{"name":"internal_error","message":"boom"}`))
 	})
-	if err := r.Send(context.Background(), "a@b.com", "c@d.com", "x", "y"); err == nil {
+	if err := r.Send(context.Background(), "a@b.com", "c@d.com", "x", "y", ""); err == nil {
 		t.Fatal("a server error was swallowed")
 	}
 	if got := calls.Load(); got != 1 {
@@ -116,7 +119,24 @@ func TestSendGivesUpWhenTheContextEnds(t *testing.T) {
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if err := r.Send(ctx, "a@b.com", "c@d.com", "x", "y"); err == nil {
+	if err := r.Send(ctx, "a@b.com", "c@d.com", "x", "y", ""); err == nil {
 		t.Fatal("a cancelled context still sent")
+	}
+}
+
+// A message with no html is sent as text alone; the field must be absent
+// rather than empty, so the provider does not render a blank html part.
+func TestSendOmitsAnEmptyHTMLPart(t *testing.T) {
+	var body map[string]any
+	r := client(t, func(w http.ResponseWriter, req *http.Request) {
+		data, _ := io.ReadAll(req.Body)
+		_ = json.Unmarshal(data, &body)
+		w.Write([]byte(`{"id":"msg"}`))
+	})
+	if err := r.Send(context.Background(), "a@b.com", "c@d.com", "x", "y", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, present := body["html"]; present {
+		t.Fatalf("an empty html part was sent: %+v", body)
 	}
 }
