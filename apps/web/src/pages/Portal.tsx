@@ -20,6 +20,7 @@ import {
   Building2,
 } from "lucide-react";
 import { api, ApiError, post, uploadFile } from "@/lib/api";
+import { usePageMeta } from "@/lib/seo";
 import type {
   Portal as PortalData,
   RequestItem,
@@ -32,6 +33,9 @@ import { useToast } from "@/lib/toast";
 import "./portal.css";
 
 export function PortalPage() {
+  // A portal link is an access token. It carries no canonical and no
+  // description: nothing about it belongs in a search result.
+  usePageMeta({ title: "Envio de documentos — DocPing" });
   const { token = "" } = useParams();
   const queryClient = useQueryClient();
   const query = useQuery({

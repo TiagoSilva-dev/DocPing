@@ -28,6 +28,12 @@ import {
 } from "lucide-react";
 import { Button, Logo } from "@/components/shared";
 import { post } from "@/lib/api";
+import {
+  faqPageLd,
+  softwareApplicationLd,
+  usePageMeta,
+  useJsonLd,
+} from "@/lib/seo";
 import type { Session } from "@/lib/types";
 import "./landing.css";
 
@@ -36,7 +42,7 @@ import "./landing.css";
 // may promote to a decision, never as a validated accuracy claim — see
 // docs/06-validacao-da-entrega.md before strengthening any wording here.
 
-const questions = [
+const questions: [string, string][] = [
   [
     "Meus clientes precisam criar uma conta?",
     "Não. O cliente acessa o link da solicitação, envia os documentos pelo celular ou computador e acompanha o que ainda falta. Sem cadastro e sem instalar aplicativo.",
@@ -140,6 +146,17 @@ const comparison = [
 ];
 
 export function Landing() {
+  usePageMeta({
+    title: "DocPing — Coleta de documentos do cliente com conferência por IA",
+    description:
+      "Solicite documentos por link, receba sem o cliente criar conta e deixe a primeira conferência com a análise automática. Feito para o fechamento contábil.",
+    path: "/",
+    index: true,
+  });
+  // Built from the arrays this page renders, so the markup search engines read
+  // and the page a person reads can never disagree.
+  useJsonLd("ld-aplicacao", softwareApplicationLd(plans));
+  useJsonLd("ld-faq", faqPageLd(questions));
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
@@ -712,14 +729,15 @@ export function Landing() {
                   className={`lp-plan-cta${plan.featured ? " lp-plan-cta-featured" : ""}`}
                   to="/cadastro"
                 >
-                  Começar teste de 14 dias
+                  Criar meu escritório
                   <ArrowRight size={14} />
                 </Link>
               </article>
             ))}
           </div>
           <p className="lp-plan-note">
-            14 dias para testar, sem cartão. No plano anual, dois meses por
+            Quer conhecer antes de assinar? A demonstração abre na hora, com
+            dados fictícios e sem cadastro. No plano anual, dois meses por
             nossa conta. Escritórios do piloto fundador mantêm o preço de
             entrada enquanto forem clientes.
           </p>

@@ -1,0 +1,15 @@
+# Only the landing page is meant for search results. The workspace, the client
+# portal and the auth forms are private or thin, and the portal links in
+# particular are access tokens that must never reach an index.
+User-agent: *
+Disallow: /app
+Disallow: /p/
+Disallow: /portal/
+Disallow: /entrar
+Disallow: /cadastro
+Disallow: /esqueci-senha
+Disallow: /redefinir-senha
+Disallow: /confirmar-email
+Disallow: /api/
+
+Sitemap: https://docping.com.br/sitemap.xml

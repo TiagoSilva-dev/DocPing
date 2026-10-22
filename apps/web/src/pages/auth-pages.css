@@ -364,6 +364,22 @@
   margin-top: 25px;
   font-size: 11px;
 }
+.auth-confirmation .auth-back-link {
+  margin: 24px 0 0;
+}
+.auth-link-button {
+  display: inline-block;
+  margin-top: 18px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #5e5e5e;
+  font-size: 11px;
+  cursor: pointer;
+}
+.auth-link-button:hover {
+  color: #141414;
+}
 .auth-primary-link {
   display: inline-flex;
   align-items: center;

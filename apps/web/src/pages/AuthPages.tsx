@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
@@ -19,9 +19,11 @@ import {
 import { Button, Field, Logo } from "@/components/shared";
 import { Form, FormMessage } from "@/components/ui/form";
 import { ApiError, post } from "@/lib/api";
+import { usePageMeta } from "@/lib/seo";
 import type { Session } from "@/lib/types";
 import "./auth-pages.css";
 
+type PendingVerification = { status: string; email: string };
 const errorMessage = (error: unknown) =>
   error instanceof Error
     ? error.message
@@ -192,10 +194,134 @@ function PasswordInput({
   );
 }
 
+// A registration now waits for the address to be confirmed, so both the
+// sign-up and the sign-in screens can end up here: one right after creating
+// the workspace, the other when someone tries to enter before confirming.
+function PendingConfirmation({
+  email,
+  onBack,
+}: {
+  email: string;
+  onBack: () => void;
+}) {
+  const [sending, setSending] = useState(false);
+  const [resent, setResent] = useState(false);
+  const [failure, setFailure] = useState("");
+  async function resend() {
+    setSending(true);
+    setFailure("");
+    try {
+      await post("/auth/resend-verification", { email });
+      setResent(true);
+    } catch (error) {
+      setFailure(errorMessage(error));
+    } finally {
+      setSending(false);
+    }
+  }
+  return (
+    <div className="auth-confirmation" role="status">
+      <span className="auth-confirmation-icon">
+        <Mail size={26} strokeWidth={1.5} />
+      </span>
+      <h2>Confirme seu e-mail.</h2>
+      <p>
+        Enviamos um link de confirmação para <strong>{email}</strong>. O acesso
+        ao seu escritório abre assim que você clicar nele, e o link vale por 24
+        horas.
+      </p>
+      <p className="auth-muted-copy">
+        Confira também a pasta de spam. Enquanto a confirmação não acontecer, o
+        espaço não fica ativo.
+      </p>
+      {resent ? (
+        <p className="auth-muted-copy" role="status">
+          Se houver uma conta aguardando confirmação, enviamos um novo link.
+        </p>
+      ) : (
+        <Button
+          variant="secondary"
+          loading={sending}
+          onClick={() => void resend()}
+        >
+          Reenviar o link
+          <ArrowRight size={15} />
+        </Button>
+      )}
+      {failure && (
+        <p className="inline-error" role="alert">
+          {failure}
+        </p>
+      )}
+      <button type="button" className="auth-link-button" onClick={onBack}>
+        Usar outro e-mail
+      </button>
+    </div>
+  );
+}
+
+// The confirmation link lands here. It is single use, and React mounts an
+// effect twice in development, so the request is fired once per page.
+export function VerifyEmailPage() {
+  usePageMeta({ title: "Confirmar e-mail — DocPing" });
+  const [params] = useSearchParams();
+  const token = params.get("token") ?? "";
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const attempted = useRef(false);
+  const [failure, setFailure] = useState("");
+  useEffect(() => {
+    if (attempted.current) {
+      return;
+    }
+    attempted.current = true;
+    if (!token) {
+      setFailure(
+        "Este link de confirmação está incompleto. Peça um novo na tela de entrada.",
+      );
+      return;
+    }
+    post<Session>("/auth/verify-email", { token })
+      .then((session) => {
+        queryClient.clear();
+        queryClient.setQueryData(["session"], session);
+        navigate("/app/solicitacoes/nova", { replace: true });
+      })
+      .catch((error) => setFailure(errorMessage(error)));
+  }, [token, navigate, queryClient]);
+  return (
+    <AuthLayout>
+      <div className="auth-confirmation" role="status">
+        <span className="auth-confirmation-icon">
+          {failure ? (
+            <Mail size={26} strokeWidth={1.5} />
+          ) : (
+            <CheckCircle2 size={26} strokeWidth={1.5} />
+          )}
+        </span>
+        <h2>
+          {failure ? "Não foi possível confirmar." : "Confirmando seu e-mail…"}
+        </h2>
+        <p>{failure || "Só um instante: estamos abrindo o seu espaço."}</p>
+        {failure && (
+          <Link to="/entrar" className="auth-back-link">
+            <ArrowLeft size={15} />
+            Voltar para entrar
+          </Link>
+        )}
+      </div>
+    </AuthLayout>
+  );
+}
+
 export function AuthPage({ register = false }: { register?: boolean }) {
+  usePageMeta({
+    title: register ? "Criar meu escritório — DocPing" : "Entrar — DocPing",
+  });
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [demoPending, setDemoPending] = useState(false);
+  const [awaitingEmail, setAwaitingEmail] = useState("");
   const {
     register: registerField,
     handleSubmit,
@@ -212,12 +338,24 @@ export function AuthPage({ register = false }: { register?: boolean }) {
   }
   async function submit(values: AuthValues) {
     try {
-      const session = await post<Session>(
+      const result = await post<Session | PendingVerification>(
         register ? "/auth/register" : "/auth/login",
         register ? values : { email: values.email, password: values.password },
       );
-      enter(session, register ? "/app/solicitacoes/nova" : "/app");
+      // Registration answers with the address it wrote to instead of a
+      // session whenever confirmation is required.
+      if ("status" in result && result.status === "verification_sent") {
+        setAwaitingEmail(result.email);
+        return;
+      }
+      enter(result as Session, register ? "/app/solicitacoes/nova" : "/app");
     } catch (error) {
+      // Signing in before confirming is not a failed attempt to show as an
+      // error: it is the same waiting state, reachable from the other side.
+      if (error instanceof ApiError && error.code === "email_unverified") {
+        setAwaitingEmail(values.email);
+        return;
+      }
       setError("root", { message: errorMessage(error) });
     }
   }
@@ -230,6 +368,16 @@ export function AuthPage({ register = false }: { register?: boolean }) {
     } finally {
       setDemoPending(false);
     }
+  }
+  if (awaitingEmail) {
+    return (
+      <AuthLayout register={register}>
+        <PendingConfirmation
+          email={awaitingEmail}
+          onBack={() => setAwaitingEmail("")}
+        />
+      </AuthLayout>
+    );
   }
   return (
     <AuthLayout register={register}>
@@ -372,8 +520,8 @@ export function AuthPage({ register = false }: { register?: boolean }) {
       </p>
       {register && (
         <p className="auth-register-note">
-          Sem dados de cobrança para começar. Você prepara a primeira
-          solicitação e conhece o fluxo no seu ritmo.
+          Vamos enviar um link para confirmar seu e-mail. Em seguida você
+          prepara a primeira solicitação e conhece o fluxo no seu ritmo.
         </p>
       )}
     </AuthLayout>
@@ -383,6 +531,7 @@ export function AuthPage({ register = false }: { register?: boolean }) {
 const forgotSchema = z.object({ email: emailSchema });
 type ForgotValues = z.infer<typeof forgotSchema>;
 export function ForgotPasswordPage() {
+  usePageMeta({ title: "Recuperar acesso — DocPing" });
   const [complete, setComplete] = useState(false);
   const {
     register,
@@ -489,6 +638,7 @@ const resetSchema = z
   });
 type ResetValues = z.infer<typeof resetSchema>;
 export function ResetPasswordPage() {
+  usePageMeta({ title: "Definir nova senha — DocPing" });
   const [params] = useSearchParams();
   const token = params.get("token") ?? "";
   const queryClient = useQueryClient();

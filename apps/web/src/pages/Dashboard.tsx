@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { useSession } from "@/lib/session";
 import { api } from "@/lib/api";
+import { usePageMeta } from "@/lib/seo";
 import type { DocumentRequest, Client } from "@/lib/types";
 import {
   Button,
@@ -47,6 +48,7 @@ import { CommunicationAlert } from "@/components/CommunicationAlert";
 import "./dashboard.css";
 
 export function Dashboard() {
+  usePageMeta({ title: "Início — DocPing" });
   const { session } = useSession();
   const navigate = useNavigate();
   const {
@@ -630,6 +632,7 @@ export function RequestTable({ requests }: { requests: DocumentRequest[] }) {
 }
 
 export function RequestsPage() {
+  usePageMeta({ title: "Solicitações — DocPing" });
   const navigate = useNavigate();
   const [params, setParams] = useState(
     () => new URLSearchParams(window.location.search),

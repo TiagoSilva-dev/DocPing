@@ -4,19 +4,83 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#141414" />
+    <title>
+      DocPing — Coleta de documentos do cliente com conferência por IA
+    </title>
     <meta
       name="description"
-      content="Solicite documentos por link, receba sem o cliente criar conta e deixe a primeira conferência com a análise automática. Feito para o fechamento do escritório contábil."
+      content="Solicite documentos por link, receba sem o cliente criar conta e deixe a primeira conferência com a análise automática. Feito para o fechamento contábil."
     />
+    <!-- The landing page is the only address meant for search results. Every
+         other route sets its own robots tag from src/lib/seo.ts, and nginx
+         sends X-Robots-Tag for the workspace and the client portal. -->
+    <link rel="canonical" href="https://docping.com.br/" />
+    <meta name="robots" content="index, follow, max-image-preview:large" />
     <meta name="referrer" content="no-referrer" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <title>DocPing — Seus clientes enviam. A IA confere.</title>
+    <!-- Social crawlers do not run JavaScript, so these stay static and
+         absolute. src/lib/seo.ts replaces the per-page ones once React boots. -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="DocPing" />
+    <meta property="og:locale" content="pt_BR" />
+    <meta property="og:url" content="https://docping.com.br/" />
+    <meta
+      property="og:title"
+      content="DocPing — Coleta de documentos do cliente com conferência por IA"
+    />
+    <meta
+      property="og:description"
+      content="Solicite documentos por link, receba sem o cliente criar conta e deixe a primeira conferência com a análise automática. Feito para o fechamento contábil."
+    />
+    <meta property="og:image" content="https://docping.com.br/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="Tela do DocPing com o fechamento mensal e os documentos aguardando revisão."
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta
+      name="twitter:title"
+      content="DocPing — Coleta de documentos do cliente com conferência por IA"
+    />
+    <meta
+      name="twitter:description"
+      content="Solicite documentos por link, receba sem o cliente criar conta e deixe a primeira conferência com a análise automática. Feito para o fechamento contábil."
+    />
+    <meta name="twitter:image" content="https://docping.com.br/og-image.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
       href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;450;500;550;600;650;700&family=IBM+Plex+Mono:wght@400;500&display=swap"
       rel="stylesheet"
     />
+    <!-- Identity of the site and the publisher. What the product is, what it
+         costs and what the FAQ answers is emitted by the landing page itself,
+         from the same arrays it renders. -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "Organization",
+            "@id": "https://docping.com.br/#organizacao",
+            "name": "DocPing",
+            "url": "https://docping.com.br/",
+            "logo": "https://docping.com.br/favicon.svg",
+            "description": "Coleta e conferência de documentos de clientes para escritórios contábeis, de advocacia e imobiliárias."
+          },
+          {
+            "@type": "WebSite",
+            "@id": "https://docping.com.br/#site",
+            "name": "DocPing",
+            "url": "https://docping.com.br/",
+            "inLanguage": "pt-BR",
+            "publisher": { "@id": "https://docping.com.br/#organizacao" }
+          }
+        ]
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

@@ -21,6 +21,7 @@ import {
   Send,
 } from "lucide-react";
 import { api, post } from "@/lib/api";
+import { usePageMeta } from "@/lib/seo";
 import type {
   Client,
   Template,
@@ -41,6 +42,7 @@ import { useToast } from "@/lib/toast";
 import "./request-flow.css";
 
 export function CreateRequest() {
+  usePageMeta({ title: "Nova solicitação — DocPing" });
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const toast = useToast();

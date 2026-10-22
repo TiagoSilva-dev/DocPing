@@ -26,6 +26,7 @@ import {
   X,
 } from "lucide-react";
 import { api, post, put } from "@/lib/api";
+import { usePageMeta } from "@/lib/seo";
 import type {
   Client,
   Organization,
@@ -615,6 +616,7 @@ function ClientImport({
 }
 
 export function ClientsPage() {
+  usePageMeta({ title: "Clientes — DocPing" });
   const query = useQuery({
     queryKey: ["clients"],
     queryFn: () => api<Client[]>("/clients"),
@@ -1174,6 +1176,7 @@ function TemplateEditor({
 }
 
 export function TemplatesPage() {
+  usePageMeta({ title: "Modelos — DocPing" });
   const query = useQuery({
     queryKey: ["templates"],
     queryFn: () => api<Template[]>("/templates"),
@@ -1769,6 +1772,7 @@ function ScheduleEditor({
 }
 
 export function SchedulesPage() {
+  usePageMeta({ title: "Recorrências — DocPing" });
   const schedules = useQuery({
     queryKey: ["schedules"],
     queryFn: () => api<Schedule[]>("/schedules"),
@@ -2002,6 +2006,7 @@ export function SchedulesPage() {
 }
 
 export function SettingsPage() {
+  usePageMeta({ title: "Configurações — DocPing" });
   const { session } = useSession();
   const organization = session.organization;
   const [draft, setDraft] = useState<Organization>({ ...organization });

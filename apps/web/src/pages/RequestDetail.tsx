@@ -25,6 +25,7 @@ import {
   X,
 } from "lucide-react";
 import { api, post } from "@/lib/api";
+import { usePageMeta } from "@/lib/seo";
 import type {
   Client,
   DocumentRequest,
@@ -52,6 +53,7 @@ import {
 import "./request-flow.css";
 
 export function RequestDetail() {
+  usePageMeta({ title: "Solicitação — DocPing" });
   const { id = "" } = useParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();

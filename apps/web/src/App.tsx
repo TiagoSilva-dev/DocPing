@@ -20,6 +20,7 @@ import { api, ApiError, getSession, post } from "@/lib/api";
 import { SessionContext } from "@/lib/session";
 import { ToastProvider } from "@/lib/toast";
 import { Shell } from "@/components/Shell";
+import { usePageMeta } from "@/lib/seo";
 import { Button, Logo, Loading, ErrorState } from "@/components/shared";
 const Dashboard = lazy(() =>
   import("@/pages/Dashboard").then((m) => ({ default: m.Dashboard })),
@@ -50,6 +51,9 @@ const SettingsPage = lazy(() =>
 );
 const AuthPage = lazy(() =>
   import("@/pages/AuthPages").then((m) => ({ default: m.AuthPage })),
+);
+const VerifyEmailPage = lazy(() =>
+  import("@/pages/AuthPages").then((m) => ({ default: m.VerifyEmailPage })),
 );
 const ForgotPasswordPage = lazy(() =>
   import("@/pages/AuthPages").then((m) => ({ default: m.ForgotPasswordPage })),
@@ -105,6 +109,7 @@ function ProtectedLayout() {
   );
 }
 function NotFound() {
+  usePageMeta({ title: "Página não encontrada — DocPing" });
   return (
     <div className="not-found-page">
       <Logo />
@@ -133,6 +138,7 @@ export default function App() {
                   path="/redefinir-senha"
                   element={<ResetPasswordPage />}
                 />
+                <Route path="/confirmar-email" element={<VerifyEmailPage />} />
                 <Route path="/p/:token" element={<PortalPage />} />
                 <Route path="/portal/:token" element={<PortalPage />} />
                 <Route path="/app" element={<ProtectedLayout />}>

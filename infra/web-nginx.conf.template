@@ -48,6 +48,26 @@ http {
       add_header X-Content-Type-Options nosniff always;
       try_files $uri =404;
     }
+    # robots.txt and the sitemap are the two files a crawler asks for before
+    # anything else; they are static and may be cached for a while.
+    location ~ ^/(robots\.txt|sitemap\.xml)$ {
+      add_header Cache-Control "public, max-age=3600";
+      add_header Referrer-Policy no-referrer always;
+      add_header X-Content-Type-Options nosniff always;
+      try_files $uri =404;
+    }
+    # The workspace, the client portal and the auth forms are served by the same
+    # index.html as the landing page, so a crawler cannot tell them apart from
+    # the markup alone. The portal links are access tokens; this header keeps
+    # them out of an index even for a crawler that ignores robots.txt, and does
+    # not depend on the page's JavaScript having run.
+    location ~ ^/(app|p|portal|entrar|cadastro|esqueci-senha|redefinir-senha|confirmar-email)(/|$) {
+      add_header X-Robots-Tag "noindex, nofollow" always;
+      add_header Cache-Control "no-store";
+      add_header Referrer-Policy no-referrer always;
+      add_header X-Content-Type-Options nosniff always;
+      try_files $uri $uri/ /index.html;
+    }
     location / {
       add_header Cache-Control "no-store";
       add_header Referrer-Policy no-referrer always;
