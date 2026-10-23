@@ -948,6 +948,13 @@ input[type="checkbox"] {
   border-radius: 6px;
   line-height: 1.6;
 }
+/* Preflight resets `margin` on every element, and an author rule beats the
+   browser's own sheet — which is where an open modal dialog gets the
+   `margin: auto` that centres it against `inset: 0`. Without this it sits in
+   the top-left corner. */
+dialog:modal {
+  margin: auto;
+}
 .modal {
   border: 1px solid #e3e3e3;
   border-radius: 13px;
