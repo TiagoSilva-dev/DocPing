@@ -296,6 +296,11 @@ func TestThePlanLimitsActiveRequests(t *testing.T) {
 
 // A batch that would cross the line is refused whole. Half a month's requests
 // is worse than none: nothing would say which clients were left out.
+//
+// Reaching the ceiling takes several competences open at once, because a
+// batch opens one request per client and the ceiling is a multiple of the
+// clients the plan sells. That is the point of deriving it: no single
+// closing can hit it, and an office only meets it by leaving months open.
 func TestABatchOverTheLimitIsRefusedWhole(t *testing.T) {
 	app, h := billingApp(t)
 	session := registerTest(t, h, "lote@exemplo.com.br")
@@ -303,7 +308,7 @@ func TestABatchOverTheLimitIsRefusedWhole(t *testing.T) {
 	now := time.Now().Unix()
 	deliver(t, h, subscriptionEvent("evt_1", "customer.subscription.created", "cus_batch", "active", priceEssencial, now, now+100))
 	ids := []string{}
-	for n := 0; n < 16; n++ {
+	for n := 0; n < 20; n++ {
 		status, body, _ := req(t, h, "POST", "/api/clients", map[string]string{"name": fmt.Sprintf("Cliente %02d", n), "cnpj": fmt.Sprintf("112223330001%02d", n)}, session)
 		if status != 200 {
 			t.Fatalf("client %d: %d %s", n, status, body)
@@ -315,10 +320,20 @@ func TestABatchOverTheLimitIsRefusedWhole(t *testing.T) {
 	_, body, _ := req(t, h, "GET", "/api/templates", nil, session)
 	var templates []struct{ ID string }
 	json.Unmarshal(body, &templates)
-	status, body, _ := req(t, h, "POST", "/api/requests", map[string]any{
-		"clientIds": ids, "templateId": templates[0].ID,
-		"title": "Fechamento mensal", "competence": "2026-10", "dueDate": "2026-11-20",
-	}, session)
+	batch := func(competence string) (int, []byte) {
+		status, body, _ := req(t, h, "POST", "/api/requests", map[string]any{
+			"clientIds": ids, "templateId": templates[0].ID,
+			"title": "Fechamento mensal", "competence": competence, "dueDate": "2026-11-20",
+		}, session)
+		return status, body
+	}
+	// Six competences fill the ceiling exactly: twenty clients, six each.
+	for _, competence := range []string{"2026-01", "2026-02", "2026-03", "2026-04", "2026-05", "2026-06"} {
+		if status, body := batch(competence); status != 200 {
+			t.Fatalf("competence %s should fit: %d %s", competence, status, body)
+		}
+	}
+	status, body := batch("2026-07")
 	if status != 422 || !strings.Contains(string(body), "plan_limit") {
 		t.Fatalf("batch over the allowance accepted: %d %s", status, body)
 	}
@@ -327,7 +342,7 @@ func TestABatchOverTheLimitIsRefusedWhole(t *testing.T) {
 	} else {
 		var requests []struct{ ID string }
 		json.Unmarshal(body, &requests)
-		if len(requests) != 0 {
+		if len(requests) != 120 {
 			t.Fatalf("a refused batch created %d requests", len(requests))
 		}
 	}
@@ -509,21 +524,46 @@ func TestBillingRoutesAreInertWithoutAKey(t *testing.T) {
 	}
 }
 
-// The allowances the server enforces must be the ones the pricing page sells.
-func TestTheSoldAllowancesAreTheEnforcedOnes(t *testing.T) {
-	for plan, want := range map[string]domain.Entitlement{
-		domain.PlanEssencial:  {ActiveRequests: 15, StorageBytes: 5 << 30},
-		domain.PlanEscritorio: {ActiveRequests: 65, StorageBytes: 30 << 30},
-		domain.PlanRede:       {ActiveRequests: 200, StorageBytes: 120 << 30},
+// The client figure the server enforces must be the one the pricing page
+// sells -- it is the only number on the cards, and the only one an office
+// counts before buying. apps/web/src/lib/plans.ts prints these three.
+func TestTheSoldClientAllowanceIsTheEnforcedOne(t *testing.T) {
+	for plan, clients := range map[string]int{
+		domain.PlanEssencial:  20,
+		domain.PlanEscritorio: 60,
+		domain.PlanRede:       150,
 	} {
-		got := domain.PlanEntitlement(plan)
-		if got.ActiveRequests != want.ActiveRequests || got.StorageBytes != want.StorageBytes {
-			t.Fatalf("%s: enforcing %+v, selling %+v", plan, got, want)
+		if got := domain.PlanEntitlement(plan).Clients; got != clients {
+			t.Fatalf("%s: enforcing %d clients, selling %d", plan, got, clients)
 		}
 	}
 	// An unknown slug must cost the customer nothing and grant the least.
-	if domain.PlanEntitlement("inventado").ActiveRequests != 15 {
+	if domain.PlanEntitlement("inventado").Clients != 20 {
 		t.Fatal("an unknown plan should fall back to the smallest paid one")
+	}
+}
+
+// The two figures that are not sold are ceilings, and a ceiling has to leave
+// room: an office that reaches one has met a limit nobody mentioned to it.
+// This does not restate the formula -- it states the floor below which the
+// formula would be a hidden boundary rather than a safety net.
+func TestTheUnsoldCeilingsStayFarAboveTheSoldFigure(t *testing.T) {
+	for _, plan := range []string{domain.PlanEssencial, domain.PlanEscritorio, domain.PlanRede} {
+		e := domain.PlanEntitlement(plan)
+		// Several competences open per client at once, never just one.
+		if e.ActiveRequests < e.Clients*4 {
+			t.Fatalf("%s: %d requests for %d clients is within reach of normal use", plan, e.ActiveRequests, e.Clients)
+		}
+		// Years of documents per client, not months.
+		if e.StorageBytes < int64(e.Clients)*(1<<30) {
+			t.Fatalf("%s: %d bytes for %d clients is within reach of normal use", plan, e.StorageBytes, e.Clients)
+		}
+	}
+	// The workspaces that never bought a plan keep the deployment ceiling.
+	for _, plan := range []string{domain.PlanFounderPilot, domain.PlanDemo} {
+		if domain.PlanEntitlement(plan).Clients != 0 {
+			t.Fatalf("%s should carry no plan figure of its own", plan)
+		}
 	}
 }
 
@@ -571,3 +611,49 @@ func TestBillingConfigurationRefusesHalfSetups(t *testing.T) {
 }
 
 var _ = billing.APIVersion
+
+// The client count is what the plan sells, so it is what the server counts.
+// The twenty-first client on Essencial is refused, and the refusal names the
+// plan rather than a deployment setting the office cannot see.
+func TestTheClientAllowanceFollowsThePlan(t *testing.T) {
+	app, h := billingApp(t)
+	session := registerTest(t, h, "carteira@exemplo.com.br")
+	linkCustomer(t, app, session.Org, "cus_clients")
+	now := time.Now().Unix()
+	deliver(t, h, subscriptionEvent("evt_1", "customer.subscription.created", "cus_clients", "active", priceEssencial, now, now+100))
+	for n := 0; n < 20; n++ {
+		status, body, _ := req(t, h, "POST", "/api/clients", map[string]string{
+			"name": fmt.Sprintf("Cliente %02d", n), "cnpj": fmt.Sprintf("112223330001%02d", n),
+		}, session)
+		if status != 200 {
+			t.Fatalf("client %d should fit in Essencial: %d %s", n, status, body)
+		}
+	}
+	status, body, _ := req(t, h, "POST", "/api/clients", map[string]string{
+		"name": "Cliente 20", "cnpj": "11222333000120",
+	}, session)
+	if status != 422 || !strings.Contains(string(body), "client_limit") {
+		t.Fatalf("the twenty-first client was accepted: %d %s", status, body)
+	}
+	// Moving up the ladder makes room without touching stored data: the limit
+	// is read from the plan, never copied into the organization.
+	deliver(t, h, subscriptionEvent("evt_2", "customer.subscription.updated", "cus_clients", "active", priceEscritorio, now+1, now+100))
+	if status, body, _ := req(t, h, "POST", "/api/clients", map[string]string{
+		"name": "Cliente 20", "cnpj": "11222333000120",
+	}, session); status != 200 {
+		t.Fatalf("Escritório should hold more clients: %d %s", status, body)
+	}
+}
+
+// A workspace that never bought a plan keeps the deployment's own limit, as
+// it did before billing existed.
+func TestThePilotKeepsTheDeploymentClientLimit(t *testing.T) {
+	org := domain.Organization{Plan: domain.PlanFounderPilot, ClientLimit: 7}
+	if got := domain.EffectiveClientLimit(org); got != 7 {
+		t.Fatalf("the pilot should keep its stored limit, got %d", got)
+	}
+	org.Plan = domain.PlanRede
+	if got := domain.EffectiveClientLimit(org); got != 150 {
+		t.Fatalf("a paid plan should decide the limit, got %d", got)
+	}
+}

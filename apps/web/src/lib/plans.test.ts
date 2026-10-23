@@ -13,11 +13,22 @@ describe("planos", () => {
     ]);
   });
 
-  // Volume is not what is sold. The ceilings in domain.entitlements protect
-  // the infrastructure; they are not a product boundary, and printing one
-  // here would turn it back into a promise -- and into a refusal the day an
-  // office reaches it in the middle of a closing.
-  it("não vende volume: nenhum card anuncia quantidade ou espaço", () => {
+  // The client count is the one figure sold, and domain.entitlements enforces
+  // it. A card that promised more than the API allows would meet the customer
+  // as a refusal in the middle of a closing.
+  it("anuncia o número de clientes que o servidor aplica", () => {
+    const sold = Object.fromEntries(
+      PLANS.map((plan) => [plan.id, plan.items.join(" ")]),
+    );
+    expect(sold.essencial).toContain("Até 20 clientes");
+    expect(sold.escritorio).toContain("Até 60 clientes");
+    expect(sold.rede).toContain("Até 150 clientes");
+  });
+
+  // Requests and storage are ceilings, not a product boundary. Printing one
+  // would turn it back into a promise -- and into a refusal the day an office
+  // reaches it without ever having been told it existed.
+  it("não vende volume: nenhum card anuncia solicitações ou espaço", () => {
     const sold = PLANS.map((plan) => `${plan.pitch} ${plan.items.join(" ")}`);
     for (const card of sold) {
       expect(card).not.toMatch(/\bGB\b/);

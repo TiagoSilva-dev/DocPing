@@ -145,7 +145,9 @@ O acesso segue o status: `active`, `trialing` e `past_due` abrem o escritório �
 
 Disputa, estorno e alerta de fraude gravam `billingAlert` e uma entrada de auditoria, e **não** suspendem ninguém: documento de cliente no meio de um fechamento não é garantia de cobrança.
 
-Os limites do plano são aplicados pelo servidor, não só anunciados: solicitações **ativas** ao mesmo tempo (15/65/200 — concluída ou cancelada libera a vaga) e armazenamento (5/30/120 GB, sempre dentro do teto da instalação). `422 plan_limit` recusa o lote inteiro quando ele cruzaria a linha, e a recorrência para de criar no limite em vez de ser o caminho que o contorna. `founder_pilot` e `demo` não têm números próprios: valem os limites da instalação, como antes.
+O que o plano vende é **cliente ativo**, e é o que o servidor conta: 20 no `essencial`, 60 no `escritorio`, 150 no `rede`. O limite é lido do plano a cada verificação, nunca copiado para o escritório, então subir de plano abre vaga sem migrar dado nenhum. `422 client_limit` recusa o cliente acima da linha.
+
+Solicitações ativas e armazenamento continuam aplicados, mas como **teto de infraestrutura, não fronteira comercial**: são derivados do número de clientes (seis solicitações abertas e dois gigabytes por cliente) e por isso nenhum fechamento isolado os alcança — um lote abre no máximo uma solicitação por cliente. Nada na página de preços os menciona. `422 plan_limit` recusa o lote inteiro quando ele cruzaria a linha, e a recorrência para no teto em vez de ser o caminho que o contorna. `founder_pilot` e `demo` não têm números próprios: valem os limites da instalação, como antes.
 
 ## Persistência e limites desta entrega
 

@@ -2,12 +2,16 @@
 // subscribe screen charges for them, so a figure edited in one and not the
 // other would be a promise the product breaks.
 //
-// Volume is deliberately not sold here: no card prints a number of active
-// requests or an amount of storage, because the office is not charged for
-// either. internal/domain/models.go still holds ceilings, and they are
-// infrastructure protection, not a product boundary -- so they must stay far
-// above what a plan's customer would ever reach. A ceiling a paying office
-// can hit is a limit we failed to mention.
+// What separates the plans is how many clients the office serves -- the
+// number it already knows before it arrives here, and the one this market
+// prices on. internal/domain/models.go enforces exactly these three figures
+// in domain.entitlements: change one here and change it there in the same
+// commit, or the card becomes a brochure again.
+//
+// Requests and storage are deliberately absent. They still exist as ceilings
+// in the same file, derived from the client figure, but they are
+// infrastructure protection rather than a product boundary -- and a ceiling
+// a paying office can reach is a limit we failed to mention.
 export interface Plan {
   id: string;
   name: string;
@@ -25,6 +29,7 @@ export const PLANS: Plan[] = [
     pitch: "Para o escritório que está organizando a coleta pela primeira vez.",
     featured: false,
     items: [
+      "Até 20 clientes",
       "Análise automática incluída",
       "Modelos e recorrências",
     ],
@@ -36,6 +41,7 @@ export const PLANS: Plan[] = [
     pitch: "Para a rotina de fechamento com uma carteira inteira todo mês.",
     featured: true,
     items: [
+      "Até 60 clientes",
       "Análise automática incluída",
       "Equipe do mesmo domínio",
       "Sua marca no portal do cliente",
@@ -48,6 +54,7 @@ export const PLANS: Plan[] = [
     pitch: "Para quem atende centenas de empresas e não pode perder prazo.",
     featured: false,
     items: [
+      "Até 150 clientes",
       "Análise automática incluída",
       "Tudo do plano Escritório",
     ],

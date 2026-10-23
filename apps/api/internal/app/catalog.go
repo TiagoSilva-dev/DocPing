@@ -62,7 +62,7 @@ func (c *call) addClient(v domain.Client) (domain.Client, error) {
 			}
 		}
 	}
-	if active >= c.Org.ClientLimit {
+	if active >= domain.EffectiveClientLimit(c.Org) {
 		return v, fail(422, "client_limit", "O limite de clientes ativos do plano foi atingido.")
 	}
 	v.ID = domain.ID()
@@ -115,7 +115,7 @@ func (a *App) updateClient(c *call) (any, error) {
 				count++
 			}
 		}
-		if count >= c.Org.ClientLimit {
+		if count >= domain.EffectiveClientLimit(c.Org) {
 			return nil, invalid("O limite de clientes ativos do plano foi atingido.")
 		}
 	}
@@ -201,7 +201,7 @@ func (a *App) importClients(c *call) (any, error) {
 			active++
 		}
 	}
-	if active+len(out) > c.Org.ClientLimit {
+	if active+len(out) > domain.EffectiveClientLimit(c.Org) {
 		errs = append(errs, map[string]any{"row": 0, "message": "O lote excede o limite de clientes ativos do plano."})
 	}
 	imported := 0

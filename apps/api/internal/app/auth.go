@@ -67,7 +67,7 @@ func (c *call) billingState() map[string]any {
 		"limits": map[string]any{
 			"activeRequests": e.ActiveRequests,
 			"storageBytes":   e.StorageBytes,
-			"clients":        c.Org.ClientLimit,
+			"clients":        domain.EffectiveClientLimit(c.Org),
 		},
 	}
 }

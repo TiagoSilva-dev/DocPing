@@ -205,9 +205,20 @@ function in the package.
   repeat and arrive out of order, and a stale cancellation would close a
   workspace that just paid. An unknown price records the status and does not
   pick a plan.
-- Plan allowances are enforced, not advertised: `domain.entitlements` holds
-  the same figures `apps/web/src/lib/plans.ts` prints. Change one and change
-  the other in the same commit, or the pricing page becomes a brochure again.
+- What a plan sells is **clients**, and only that: `domain.entitlements` holds
+  the same three figures `apps/web/src/lib/plans.ts` prints (20/60/150).
+  Change one and change the other in the same commit, or the pricing page
+  becomes a brochure again. `domain.EffectiveClientLimit` reads the limit from
+  the plan on every check instead of copying it into the organization, so an
+  upgrade takes effect without touching stored data; `Organization.ClientLimit`
+  still answers for `founder_pilot` and `demo`, which buy nothing.
+- Active requests and storage are **ceilings, not a product boundary**. They
+  are derived in `sold()` from the client figure — six open requests and two
+  gigabytes per client — so they grow with the plan and no single closing can
+  reach them. Nothing on the pricing page mentions them, and that is the
+  point: a ceiling a paying office can hit is a limit nobody told it about.
+  Raise the clients a plan sells and the room follows; never set one by hand
+  near the sold figure.
 
 ### Domain rules
 

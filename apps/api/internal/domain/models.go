@@ -313,27 +313,61 @@ const (
 )
 
 // Entitlement is what a plan actually grants, checked by the server rather
-// than only printed on the pricing page. ActiveRequests and StorageBytes are
-// zero when the plan carries no limit of its own and the deployment-wide
-// ceiling in the configuration applies instead.
+// than only printed on the pricing page.
+//
+// Only Clients is sold. It is the one figure the pricing page prints, the one
+// an office counts before buying, and the one the market prices on. The other
+// two are ceilings that protect the deployment -- an office that reaches one
+// of them has met a limit nobody told it about, so they are set far above any
+// honest use of the plan rather than close to it. They are zero when the plan
+// carries no figure of its own and the deployment-wide ceiling in the
+// configuration applies instead.
 type Entitlement struct {
 	Plan           string
+	Clients        int
 	ActiveRequests int
 	StorageBytes   int64
 }
 
 const gib = 1 << 30
 
-// entitlements mirrors the figures printed on the pricing page. They are the
-// promise being sold: change one here and change it there in the same commit.
+// sold builds an entitlement from the only number that is sold. Six open
+// requests per client covers a year-end with monthly, quarterly and annual
+// collections open at once; two gigabytes per client is several years of
+// documents. Deriving them keeps the ceilings tied to the promise: raise the
+// clients a plan sells and its room grows with it, instead of silently
+// becoming tight.
+func sold(name string, clients int) Entitlement {
+	return Entitlement{
+		Plan:           name,
+		Clients:        clients,
+		ActiveRequests: clients * 6,
+		StorageBytes:   int64(clients) * 2 * gib,
+	}
+}
+
+// entitlements mirrors the client figures printed on the pricing page. They
+// are the promise being sold: change one here and change it there in the same
+// commit.
 var entitlements = map[string]Entitlement{
-	PlanEssencial:  {Plan: PlanEssencial, ActiveRequests: 15, StorageBytes: 5 * gib},
-	PlanEscritorio: {Plan: PlanEscritorio, ActiveRequests: 65, StorageBytes: 30 * gib},
-	PlanRede:       {Plan: PlanRede, ActiveRequests: 200, StorageBytes: 120 * gib},
+	PlanEssencial:  sold(PlanEssencial, 20),
+	PlanEscritorio: sold(PlanEscritorio, 60),
+	PlanRede:       sold(PlanRede, 150),
 	// The pilot and the demonstration carry no figures of their own: the
 	// deployment ceiling is their only limit, as it was before billing.
 	PlanFounderPilot: {Plan: PlanFounderPilot},
 	PlanDemo:         {Plan: PlanDemo},
+}
+
+// EffectiveClientLimit is how many active clients an organization may hold.
+// The plan decides it when the plan sells a figure; the stored ClientLimit
+// answers for the workspaces that never bought one -- the founder pilot and
+// the demonstration -- exactly as it did before billing existed.
+func EffectiveClientLimit(o Organization) int {
+	if e := PlanEntitlement(o.Plan); e.Clients > 0 {
+		return e.Clients
+	}
+	return o.ClientLimit
 }
 
 // PlanEntitlement resolves what a stored plan grants. An unknown plan — a slug
