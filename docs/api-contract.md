@@ -133,7 +133,7 @@ Limites conhecidos: os limiares são ponto de partida e precisam ser calibrados 
 
 Desligado por padrão. Sem `STRIPE_SECRET_KEY` nenhuma rota de cobrança existe, nenhum espaço é bloqueado e o cadastro nasce como `founder_pilot`, exatamente como antes de haver dinheiro.
 
-Com a chave configurada, três planos mensais em BRL são vendidos por Stripe Checkout — `essencial` (R$97), `escritorio` (R$237) e `rede` (R$487) —, cada um ligado ao seu preço por `STRIPE_PRICE_*`. Um escritório criado a partir daí nasce **sem plano** e só abre quando a Stripe confirmar a assinatura.
+Com a chave configurada, três planos mensais em BRL são vendidos por Stripe Checkout — `essencial` (R$67), `escritorio` (R$127) e `rede` (R$197) —, cada um ligado ao seu preço por `STRIPE_PRICE_*`. Um escritório criado a partir daí nasce **sem plano** e só abre quando a Stripe confirmar a assinatura.
 
 - `POST /billing/checkout`: `{plan}` → `{url}`. Exige sessão e CSRF. Abre o Checkout hospedado (modo assinatura, locale pt-BR, coleta de CNPJ, cupons habilitados) e responde com a URL da Stripe. `422` para plano que esta instalação não vende, `409 demo_organization` para a demonstração, `409 already_subscribed` para quem já tem assinatura viva, `503 billing_disabled` sem Stripe configurada. Limite de10 por minuto por IP.
 - `POST /billing/portal` → `{url}`. Abre o portal da própria Stripe, onde se troca o cartão, muda de plano e cancela. `409 no_subscription` para quem nunca assinou. Nenhum dado de cartão passa por este produto.

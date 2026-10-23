@@ -2,15 +2,16 @@
 // subscribe screen charges for them, so a figure edited in one and not the
 // other would be a promise the product breaks.
 //
-// These numbers are the same ones the API enforces, in
-// internal/domain/models.go: fifteen, sixty-five and two hundred active
-// requests, five, thirty and a hundred and twenty GB. Changing a figure here
-// without changing it there turns the pricing page back into a brochure.
+// Volume is deliberately not sold here: no card prints a number of active
+// requests or an amount of storage, because the office is not charged for
+// either. internal/domain/models.go still holds ceilings, and they are
+// infrastructure protection, not a product boundary -- so they must stay far
+// above what a plan's customer would ever reach. A ceiling a paying office
+// can hit is a limit we failed to mention.
 export interface Plan {
   id: string;
   name: string;
   price: string;
-  unit: string;
   pitch: string;
   featured: boolean;
   items: string[];
@@ -20,13 +21,10 @@ export const PLANS: Plan[] = [
   {
     id: "essencial",
     name: "Essencial",
-    price: "97",
-    unit: "R$ 6,47 por solicitação ativa",
+    price: "67",
     pitch: "Para o escritório que está organizando a coleta pela primeira vez.",
     featured: false,
     items: [
-      "15 solicitações ativas",
-      "5 GB de armazenamento",
       "Análise automática incluída",
       "Modelos e recorrências",
     ],
@@ -34,13 +32,10 @@ export const PLANS: Plan[] = [
   {
     id: "escritorio",
     name: "Escritório",
-    price: "237",
-    unit: "R$ 3,65 por solicitação ativa",
+    price: "127",
     pitch: "Para a rotina de fechamento com uma carteira inteira todo mês.",
     featured: true,
     items: [
-      "65 solicitações ativas",
-      "30 GB de armazenamento",
       "Análise automática incluída",
       "Equipe do mesmo domínio",
       "Sua marca no portal do cliente",
@@ -49,13 +44,10 @@ export const PLANS: Plan[] = [
   {
     id: "rede",
     name: "Rede",
-    price: "487",
-    unit: "R$ 2,44 por solicitação ativa",
+    price: "197",
     pitch: "Para quem atende centenas de empresas e não pode perder prazo.",
     featured: false,
     items: [
-      "200 solicitações ativas",
-      "120 GB de armazenamento",
       "Análise automática incluída",
       "Tudo do plano Escritório",
     ],

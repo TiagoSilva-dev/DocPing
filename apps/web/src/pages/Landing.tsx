@@ -671,7 +671,6 @@ export function Landing() {
                   <strong>{plan.price}</strong>
                   <span className="lp-plan-period">/mês</span>
                 </div>
-                <span className="lp-plan-unit">{plan.unit}</span>
                 <ul>
                   {plan.items.map((item) => (
                     <li key={item}>

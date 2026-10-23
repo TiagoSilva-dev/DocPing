@@ -13,19 +13,17 @@ describe("planos", () => {
     ]);
   });
 
-  // These are the figures the server enforces in domain.entitlements. If the
-  // page sells more than the API allows, the customer meets the difference as
-  // a refusal in the middle of a closing.
-  it("anuncia os limites que o servidor aplica", () => {
-    const sold = Object.fromEntries(
-      PLANS.map((plan) => [plan.id, plan.items.join(" ")]),
-    );
-    expect(sold.essencial).toContain("15 solicitações ativas");
-    expect(sold.essencial).toContain("5 GB");
-    expect(sold.escritorio).toContain("65 solicitações ativas");
-    expect(sold.escritorio).toContain("30 GB");
-    expect(sold.rede).toContain("200 solicitações ativas");
-    expect(sold.rede).toContain("120 GB");
+  // Volume is not what is sold. The ceilings in domain.entitlements protect
+  // the infrastructure; they are not a product boundary, and printing one
+  // here would turn it back into a promise -- and into a refusal the day an
+  // office reaches it in the middle of a closing.
+  it("não vende volume: nenhum card anuncia quantidade ou espaço", () => {
+    const sold = PLANS.map((plan) => `${plan.pitch} ${plan.items.join(" ")}`);
+    for (const card of sold) {
+      expect(card).not.toMatch(/\bGB\b/);
+      expect(card).not.toMatch(/\d+\s*solicitações/);
+      expect(card).not.toMatch(/\bpor solicitação\b/);
+    }
   });
 
   it("tem um único plano em destaque", () => {

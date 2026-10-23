@@ -76,7 +76,7 @@ export default function Subscribe() {
         <p className="subscribe-lead">
           {lapsed
             ? "Os documentos que você já recebeu continuam guardados. Para voltar a criar solicitações, reative a assinatura."
-            : "A conferência automática entra em todos os planos. O que muda é o volume de solicitações ativas e o espaço de armazenamento."}
+            : "A conferência automática entra em todos os planos."}
         </p>
         {params.get("assinatura") === "cancelada" && (
           <p className="subscribe-note" role="status">
