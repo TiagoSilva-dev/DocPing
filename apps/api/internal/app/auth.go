@@ -361,7 +361,17 @@ func (a *App) forgotPassword(c *call) (any, error) {
 			c.S.Resets[reset.Hash] = reset
 			to := u.Email
 			c.effects = append(c.effects, func() error {
-				if err := a.sendEmail(to, "Redefina sua senha do DocPing", "Use este link em até 30 minutos: "+a.Config.Origin+"/redefinir-senha?token="+raw); err != nil {
+				content := emailContent{
+					Preheader:  "Link para criar uma senha nova, válido por 30 minutos.",
+					Heading:    "Redefina sua senha",
+					Paragraphs: []string{"Recebemos um pedido para criar uma senha nova no DocPing. O link vale por 30 minutos e só pode ser usado uma vez."},
+					Action:     &emailAction{Label: "Criar senha nova", URL: a.Config.Origin + "/redefinir-senha?token=" + raw},
+					// Said plainly because it is what the reader needs to
+					// know: receiving this does not mean anyone got in, and
+					// doing nothing is a complete answer.
+					Note: "Se não foi você que pediu, ignore esta mensagem. Sua senha atual continua valendo e ninguém teve acesso à sua conta.",
+				}
+				if err := a.sendEmailHTML(to, "Redefina sua senha do DocPing", plainEmail(content), a.renderEmail(content)); err != nil {
 					ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 					defer cancel()
 					_ = a.Store.Run(ctx, true, func(s *domain.State) error {

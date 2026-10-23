@@ -7,6 +7,7 @@ import (
 	"mime/quotedprintable"
 	"strings"
 	"testing"
+	"time"
 )
 
 func sampleContent() emailContent {
@@ -204,5 +205,64 @@ func TestDatesAreWrittenForTheReader(t *testing.T) {
 	}
 	if got := competenceLabel(""); got != "" {
 		t.Fatalf("empty competence: %q", got)
+	}
+}
+
+// The whole flow, through a real SMTP server: a registration and a password
+// reset both arrive as two-part messages carrying their own link. This is
+// the check that the layout is actually wired into what the product sends,
+// not only into a function a test calls directly.
+func TestTheSentMessagesCarryBothParts(t *testing.T) {
+	app, h := setup(t)
+	host, port, messages := smtpFixture(t)
+	app.Config.SMTPHost = host
+	app.Config.SMTPPort = port
+	app.Config.SMTPFrom = "docping@example.invalid"
+	app.Config.SMTPRequireTLS = false
+	app.Config.VerifyEmail = true
+
+	next := func(what string) string {
+		t.Helper()
+		select {
+		case m := <-messages:
+			return m
+		case <-time.After(3 * time.Second):
+			t.Fatalf("%s was not sent", what)
+			return ""
+		}
+	}
+	bothParts := func(t *testing.T, message, what string) {
+		t.Helper()
+		if !strings.Contains(message, "multipart/alternative") {
+			t.Fatalf("%s has no html part:\n%s", what, message)
+		}
+		if !strings.Contains(message, "Content-Type: text/plain") || !strings.Contains(message, "Content-Type: text/html") {
+			t.Fatalf("%s is missing one of the parts:\n%s", what, message)
+		}
+	}
+
+	// Not registerTest: with confirmation on, registration deliberately
+	// returns no session, and the helper expects one.
+	if status, body, _ := req(t, h, "POST", "/api/auth/register", map[string]string{
+		"organizationName": "Escritório Teste", "name": "Mariana",
+		"email": "layout@example.invalid", "password": "uma senha segura 123",
+	}, testSession{}); status != 200 {
+		t.Fatalf("register: %d %s", status, body)
+	}
+	confirmation := next("the confirmation")
+	bothParts(t, confirmation, "the confirmation")
+	if !strings.Contains(confirmation, "Confirme seu e-mail") {
+		t.Fatalf("confirmation lost its words:\n%s", confirmation)
+	}
+
+	if status, body, _ := req(t, h, "POST", "/api/auth/forgot-password", map[string]string{"email": "layout@example.invalid"}, testSession{}); status != 200 {
+		t.Fatalf("forgot-password: %d %s", status, body)
+	}
+	reset := next("the password reset")
+	bothParts(t, reset, "the password reset")
+	for _, want := range []string{"Redefina sua senha", "redefinir-senha?token=3D", "Sua senha atual continua valendo"} {
+		if !strings.Contains(reset, want) {
+			t.Fatalf("%q missing from the reset message:\n%s", want, reset)
+		}
 	}
 }
