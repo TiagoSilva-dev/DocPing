@@ -6,7 +6,7 @@ Registro de 19–20/10/2026, fuso America/Sao_Paulo. Todos os clientes, organiza
 
 O fluxo funcional implementado passou em testes de código e em **18 cenários contra serviços reais de desenvolvimento**. O frontend compila, é empacotado em container e responde via Nginx com o proxy da API funcionando. **A experiência visual/mobile ainda não foi validada no navegador; esta entrega não está liberada para documentos reais ou piloto pago.**
 
-Duas mudanças posteriores a este registro **não estão cobertas pelos números acima**: a conversão da paleta para preto/branco/cinza e a análise automática de documentos (Docling + PaddleOCR + Jev). Para elas, veja "Mudanças posteriores" no fim deste documento.
+Três mudanças posteriores a este registro **não estão cobertas pelos números acima**: a conversão da paleta para preto/branco/cinza, a análise automática de documentos (Docling + PaddleOCR + Jev) e a remoção do ClamAV. Para elas, veja "Mudanças posteriores" no fim deste documento. Os itens 6, 7 e 11 da lista de integração e a linha do Compose descrevem um scanner que **não existe mais no produto**.
 
 ## Evidências executadas
 
@@ -20,7 +20,7 @@ Duas mudanças posteriores a este registro **não estão cobertas pelos números
 | Testes focados posteriores de storage/autenticação | Passaram | Três cenários SSE-S3 no transporte de teste: confirmação AES256, ausência de confirmação com descarte e desenvolvimento sem SSE; metadata de ambiente e autenticação |
 | `go vet ./...` | Passou | Análise estática do Go |
 | Compose, com e sem perfil `web` | Configuração passou; imagens construídas e serviços iniciados | API, MySQL 8, MinIO, Mailpit, ClamAV e Nginx reais no Docker local |
-| `node scripts/integration-smoke.mjs --mysql --eicar` | **18 cenários passaram** | Fluxo completo descrito abaixo; relatório sanitizado versionado em [validation/integration-smoke.json](validation/integration-smoke.json) |
+| `node scripts/integration-smoke.mjs --mysql --eicar` | **18 cenários passaram** | Fluxo completo descrito abaixo; relatório sanitizado desta rodada em [validation/integration-smoke-20261020.json](validation/integration-smoke-20261020.json). O arquivo `integration-smoke.json` passou a guardar a rodada de 26/10/2026, sem o scanner |
 | Comando `npm run dev` com API em porta alternativa | Passou | Vite e API responderam, proxy encaminhou corretamente e `Ctrl+C` não deixou processos nas portas de teste |
 | HTTP do frontend e proxy | `200 OK` e `{status:ok}` | Nginx serviu `http://localhost:5173`; `/api/health` alcançou a API |
 | `npm run test:e2e -- --list` | Sete casos descobertos | Confirma a preparação/discovery da suíte; não prova que os fluxos passaram |
@@ -129,6 +129,41 @@ Os três caminhos do fluxo se comportaram como projetado, incluindo a escalada: 
 4. Acurácia, latência e custo por documento em volume real seguem sem medição. O teste usou PDFs de 1 a 2 KB.
 5. O envio de conteúdo extraído a um serviço externo não foi avaliado sob a ótica de LGPD nem incluído nos gates de `docs/05-seguranca-e-piloto.md`.
 6. O painel de análise não foi visto em navegador.
+
+### Remoção do ClamAV — 26/10/2026
+
+O scanner antivírus foi removido do código, do Compose e da infraestrutura por custo: o
+clamd carrega a base de assinaturas inteira em memória (976 MiB medidos, serviço
+dimensionado em 4 GiB) e era o item mais caro da hospedagem. Nenhuma varredura substitui
+a que saiu.
+
+| Verificação | Resultado | Alcance |
+|---|---|---|
+| `go build ./...` / `go vet ./...` | Passaram | Pacote `storage` sem o protocolo clamd; `Config` sem `Scanner`/`AllowUnscanned` |
+| `go test ./...` | Passou | Toda a suíte Go após a remoção, incluindo upload e revisão |
+| `npm run check` / `npm test` | Passaram | Tipos e os 20 testes de lógica pura |
+| `docker compose config` | Passou | Compose sem o serviço e sem o volume `clamav_data` |
+| `node scripts/integration-smoke.mjs --mysql` | **17 de 17 passaram**, em 10 s | Compose real sem `clamav`: API Go, MySQL 8, MinIO e Mailpit. Inclui `TestMySQLRoundTrip` sem skip. Relatório: [validation/integration-smoke.json](validation/integration-smoke.json) |
+| `SELECT scan_status, COUNT(*) FROM document_files GROUP BY scan_status` | `unscanned` 3, `clean` 18 | Os três arquivos desta rodada gravaram `unscanned`; os 18 `clean` são de rodadas com o scanner e seguem legíveis pela lista de permissão de `readableFile` |
+
+O script caiu de 18 para 17 cenários: saíram as duas asserções de `scanStatus: 'clean'` e o
+cenário `--eicar`. O relatório versionado foi substituído pelo desta rodada; o de
+20/10/2026, com o scanner, permanece apenas no histórico do Git.
+
+**Correção necessária no caminho:** o smoke não rodava desde que a confirmação de e-mail
+entrou na API (commit `606bb9d`) — ele esperava sessão na resposta do cadastro e quebrava
+no segundo cenário, antes de chegar a qualquer upload. O helper `register` passou a ler o
+link de confirmação na mensagem real do Mailpit e a chamar `POST /auth/verify-email`, o
+que também passou a cobrir o envio desse e-mail. Isso não tem relação com o ClamAV; foi
+encontrado ao executar a suíte.
+
+**Não validado:** nada nesta rodada toca navegador, TLS de produção, entrega externa de
+e-mail ou recuperação de backup. O ambiente é o Compose local, com arquivos sintéticos.
+
+**Consequência de produto, registrada em `docs/05-seguranca-e-piloto.md`:** o upload
+passou a ser protegido apenas pela verificação de tipo (conteúdo e extensão), pelo limite
+de tamanho, pelo bucket privado e pela sessão. As duas alegações de antivírus na landing
+foram trocadas pelo que é verdade; nenhuma tela afirma que o arquivo foi verificado.
 
 ## Lacuna conhecida: retenção não é aplicada
 

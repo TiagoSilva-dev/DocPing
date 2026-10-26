@@ -254,8 +254,8 @@ func productionBase() map[string]string {
 		"APP_ENV": "production", "STORE_DRIVER": "mysql", "WEB_ORIGIN": "https://app.example.com",
 		"MYSQL_DSN":   "u:p@tcp(mysql.railway.internal:3306)/docping?tls=true",
 		"S3_ENDPOINT": "https://s3.example.com", "S3_ACCESS_KEY": "a", "S3_SECRET_KEY": "s",
-		"CLAMAV_ADDRESS": "clamav:3310", "SMTP_HOST": "smtp.example.com", "SMTP_FROM": "no-reply@example.com",
-		"MYSQL_CA_CERT": "", "ALLOW_UNSCANNED_UPLOADS": "", "AI_REVIEW_ENABLED": "",
+		"SMTP_HOST": "smtp.example.com", "SMTP_FROM": "no-reply@example.com",
+		"MYSQL_CA_CERT": "", "AI_REVIEW_ENABLED": "",
 	}
 }
 

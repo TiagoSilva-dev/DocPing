@@ -74,7 +74,7 @@ const questions: [string, string][] = [
   ],
   [
     "Onde os arquivos ficam guardados?",
-    "Em armazenamento privado, nunca em link público. Todo arquivo passa por antivírus antes de ser aceito e só é servido a quem tem sessão no seu escritório, com os dados de cada escritório isolados dos demais.",
+    "Em armazenamento privado, nunca em link público. Só PDF, JPG, PNG e HEIC são aceitos, conferidos pelo conteúdo e não apenas pela extensão, e o arquivo só é servido a quem tem sessão no seu escritório, com os dados de cada escritório isolados dos demais.",
   ],
   [
     "Posso conhecer antes de cadastrar meus clientes?",
@@ -607,8 +607,8 @@ export function Landing() {
                 },
                 {
                   icon: ShieldCheck,
-                  title: "Antivírus em todo upload",
-                  text: "Todo arquivo é verificado antes de ser aceito. Na dúvida, o envio é recusado.",
+                  title: "Tipo de arquivo conferido",
+                  text: "Só PDF, JPG, PNG e HEIC entram, verificados pela assinatura do conteúdo e não apenas pela extensão.",
                 },
                 {
                   icon: Eye,

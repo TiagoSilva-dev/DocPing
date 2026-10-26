@@ -98,8 +98,8 @@ func TestProductionRequiresAWayToSend(t *testing.T) {
 	base := func() Config {
 		return Config{
 			Env: "production", Driver: "mysql", DSN: "user:pass@tcp(db:3306)/docping?tls=true",
-			S3Endpoint: "https://s3.example.com", Scanner: "clamav:3310",
-			Origin: "https://docping.com.br", Port: "8080",
+			S3Endpoint: "https://s3.example.com",
+			Origin:     "https://docping.com.br", Port: "8080",
 			MaxUpload: 1 << 20, MaxOrgBytes: 1 << 30, MaxRequestBytes: 1 << 20, ClientLimit: 30,
 		}
 	}

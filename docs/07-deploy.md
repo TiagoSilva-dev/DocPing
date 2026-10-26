@@ -11,7 +11,6 @@ navegador
                                 ├── /        SPA estática
                                 └── /api/*   proxy → serviço "api" (Go)
                                                    ├── MySQL      (Railway)
-                                                   ├── ClamAV     (Railway)
                                                    ├── Docling    (Railway, opcional)
                                                    └── Bucket S3  (Railway — ver "Os arquivos")
 ```
@@ -31,7 +30,6 @@ O ambiente que existe hoje é o projeto `docping`
 | `web` | repo, `apps/web/Dockerfile` | Público. Diretório raiz `/`. Precisa de `API_UPSTREAM` |
 | `api` | repo, `apps/api/Dockerfile` | **Sem domínio público**. Diretório raiz `/apps/api` |
 | `MySQL` | repo, `infra/mysql.Dockerfile` | Imagem própria. Ver "O TLS do MySQL" |
-| `clamav` | `clamav/clamav:1.4.6-debian` | **Mais de 1 GiB de RAM.** Ver "O ClamAV" |
 | `docling` | `quay.io/docling-project/docling-serve-cpu:v1.37.0` | Opcional; só com IA ligada |
 
 O `api` **não** deve receber domínio público. Todo o tráfego entra pelo `web`,
@@ -51,8 +49,8 @@ para ela.
 **Não monte volume no cache de modelos.** Os pesos vêm embutidos na imagem —
 o serviço registra no start `artifacts_path is set to a valid directory. No
 model weights will be downloaded at runtime`. Um volume vazio montado em
-`/opt/app-root/src/.cache` esconderia esses pesos, que é o mesmo acidente
-descrito em "O ClamAV". Sem volume o serviço sobe em cerca de 10 segundos.
+`/opt/app-root/src/.cache` esconderia esses pesos. Sem volume o serviço sobe em
+cerca de 10 segundos.
 
 Medido em produção: 2,18 GB comprimidos em `linux/amd64` (14 camadas) e
 **1,27 GB de RAM ocioso**, com CPU perto de zero fora de uma conversão.
@@ -75,8 +73,7 @@ Três comportamentos custaram tempo e vale registrar:
   `UVICORN_HOST` vem como `0.0.0.0`, então `docling.railway.internal:5001`
   ficaria inalcançável sem erro visível na API — só análises falhando. O serviço
   `docling` leva `UVICORN_HOST=::`, e o log confirma com
-  `Uvicorn running on http://[::]:5001`. O ClamAV **não** precisa disso: o clamd
-  escuta nas duas famílias quando o container tem IPv6 global.
+  `Uvicorn running on http://[::]:5001`.
 - **A branch não ficou gravada no serviço.** Apontar o serviço para uma branch
   que não é a padrão do repositório não persistiu, e os deploys seguintes saíram
   de `main`. Hoje `api` e `web` estão fixados por commit, o que é determinístico
@@ -159,8 +156,6 @@ S3_ACCESS_KEY=${{docping-files.ACCESS_KEY_ID}}
 S3_SECRET_KEY=${{docping-files.SECRET_ACCESS_KEY}}
 S3_ACCEPT_UNCONFIRMED_ENCRYPTION=true         # ver "Os arquivos"
 
-CLAMAV_ADDRESS=clamav.railway.internal:3310
-
 # E-mail. Na Railway abaixo do plano Pro o SMTP de saída é bloqueado e a
 # conexão expira sem erro do provedor -- veja "O e-mail não sai por SMTP".
 RESEND_API_KEY=re_...
@@ -197,9 +192,6 @@ aplicações OAuth de todo modo.
 `TRUSTED_PROXY_CIDRS` não é detalhe: o limite de requisições é por endereço, e
 sem ele o `web` inteiro conta como um único cliente — um visitante tranca o
 resto. A rede interna da Railway é IPv6 privada (`fd00::/8`).
-
-`ALLOW_UNSCANNED_UPLOADS` não pode existir em produção. `LoadConfig` recusa
-subir se encontrá-la.
 
 ## O TLS do MySQL
 
@@ -244,22 +236,32 @@ diferente falha com `hostname mismatch`. Em produção a API sobe e serve.
 Note que a Railway resolve `mysql:8` para **8.4**, enquanto o
 `docker-compose.yml` local usa 8.0.
 
-## O ClamAV
+## O ClamAV foi removido — 26/10/2026
 
-Duas coisas, ambas descobertas na prática:
+Havia um serviço `clamav` varrendo todo upload. Ele saiu do produto e da
+infraestrutura **por custo**: o clamd carrega a base de assinaturas inteira em
+memória — 976 MiB medidos localmente, 1,33 GB na Railway, e com o padrão de 1 GB
+o processo morria antes de abrir o socket, sem log próprio, só o laço `Socket
+for clamd not found yet, retrying`. Rodava em 4 GiB / 2 vCPU, mais memória que
+o resto da pilha somada, para um produto que ainda não tem escritório pagante.
 
-- **Memória.** O clamd carrega a base de assinaturas inteira: medi 976 MiB
-  localmente e 1,33 GB na Railway. A Railway aplicou 1 GB por padrão ao serviço
-  e o processo morria antes de abrir o socket, sem deixar log próprio — só o
-  laço `Socket for clamd not found yet, retrying`. Está em 4 GiB / 2 vCPU.
-- **Não monte volume em `/var/lib/clamav`.** Volume novo monta vazio e esconde a
-  base que a imagem já traz; o clamd não sobe. A base é reconstruída pelo
-  freshclam a cada início, o que custa um download de ~110 MB e é o preço aceito
-  aqui. Se quiser cache persistente, monte em outro caminho e aponte o
-  `DatabaseDirectory`.
+Consequências, em ordem de importância:
 
-Quando o scanner não responde, o upload falha **fechado**, com
-`503 scan_failed` — é o comportamento desejado, não um defeito.
+- **Nenhum arquivo é varrido.** Todo upload é gravado como `unscanned`. O que
+  protege o upload agora é a verificação de tipo por conteúdo *e* extensão (só
+  PDF/JPG/PNG/HEIC), o limite de tamanho, o nome saneado, o bucket privado e a
+  autorização em cada download. Nada disso detecta malware.
+- `CLAMAV_ADDRESS` e `ALLOW_UNSCANNED_UPLOADS` **não existem mais**: deixe as
+  duas fora do ambiente. Os códigos `503 scan_failed` e `422 malware_rejected`
+  saíram do contrato.
+- O risco está registrado como aceito em `docs/05-seguranca-e-piloto.md`, no
+  gate "Upload malicioso". Antes de um piloto com documentos reais, ou alguém
+  aceita o risco por escrito, ou o scanner volta.
+
+Para reintroduzi-lo: `git revert` do commit que o removeu, serviço com mais de
+1 GiB de RAM e **sem** volume em `/var/lib/clamav` (volume novo monta vazio e
+esconde a base que a imagem já traz; o freshclam reconstrói a cada início, ~110
+MB de download).
 
 ## Os arquivos
 
@@ -386,15 +388,13 @@ CNPJ está ligada, o que cobre a nota do cliente PJ, não a apuração.
 3. Projeto na Railway.
 4. Serviço `MySQL` a partir de `infra/mysql.Dockerfile`, com volume em
    `/var/lib/mysql`. Leia o certificado da CA no log do primeiro boot.
-5. Serviço `clamav`, com mais de 1 GiB de RAM e **sem** volume em
-   `/var/lib/clamav`.
-6. Serviço `api`, diretório raiz `/apps/api`, healthcheck `/api/health`, com as
+5. Serviço `api`, diretório raiz `/apps/api`, healthcheck `/api/health`, com as
    variáveis acima e o `MYSQL_CA_CERT` do passo 4. Sem domínio público.
-7. Serviço `web`, diretório raiz `/`, Dockerfile `apps/web/Dockerfile`, com
+6. Serviço `web`, diretório raiz `/`, Dockerfile `apps/web/Dockerfile`, com
    `API_UPSTREAM` apontando para o `api`.
-8. Domínio no `web`, e só então `WEB_ORIGIN` com esse domínio. O webhook da
+7. Domínio no `web`, e só então `WEB_ORIGIN` com esse domínio. O webhook da
    Stripe aponta para esse mesmo domínio, então ele precisa existir antes.
-9. Migrações: são embutidas e aplicadas sozinhas no start da API.
+8. Migrações: são embutidas e aplicadas sozinhas no start da API.
 
 Com IA, acrescente o `docling` e só então ligue `AI_REVIEW_ENABLED=true`.
 Deixe os escritórios em `suggest` — os limiares seguem sem calibração, como
@@ -422,11 +422,11 @@ Executado contra a Railway e observado funcionando:
 - `api` subindo com `APP_ENV=production` — o que significa que todo o
   `LoadConfig` passou — e respondendo `/api/health`.
 - MySQL com **verificação completa de TLS**, cadeia e hostname.
-- ClamAV varrendo: o upload de teste passou pela varredura.
 - Fluxo de escritório: registro, criação de cliente, modelos semeados,
   criação de solicitação e geração de link do portal, todos `200`.
-- Upload completo: varredura `clean`, objeto gravado e baixado de volta com os
-  bytes idênticos ao enviado.
+- Upload completo: objeto gravado e baixado de volta com os bytes idênticos ao
+  enviado. *(A varredura `clean` observada nessa rodada era do ClamAV, removido
+  em 26/10/2026; hoje o mesmo upload grava `unscanned`.)*
 - **Análise automática de ponta a ponta**: um DARF de teste com 862 caracteres
   de texto foi extraído pelo Docling (`extractor: docling`, 882 caracteres),
   julgado pelo Jev (`model: jev-1.13.0`) e composto pelo `Decide` em seis

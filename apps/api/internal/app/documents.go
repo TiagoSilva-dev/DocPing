@@ -19,10 +19,17 @@ import (
 )
 
 // readableFile is the single rule for "this file may be opened, reviewed or
-// analysed": the scanner cleared it, it is a seeded sample, or development
-// explicitly allowed unscanned uploads.
+// analysed". Uploads are no longer scanned for malware, so what qualifies is a
+// status this product writes: "unscanned" today, "clean" or
+// "unscanned_development" from the uploads stored while the scanner existed, or
+// a seeded sample. It stays an allow-list on purpose, so no quarantine value a
+// stored row might still carry can ever read as readable.
 func (a *App) readableFile(f domain.DocumentFile) bool {
-	return f.ScanStatus == "clean" || f.Sample || a.Config.Env == "development" && f.ScanStatus == "unscanned_development"
+	switch f.ScanStatus {
+	case domain.ScanUnscanned, "clean", "unscanned_development":
+		return true
+	}
+	return f.Sample
 }
 func safeFilename(v string) string {
 	v = strings.ReplaceAll(v, "\\", "/")
@@ -70,9 +77,9 @@ func detectFile(name string, data []byte) (string, error) {
 	return kind, nil
 }
 
-// Reading the mobile connection, malware scanning and object I/O deliberately
-// happen outside the transaction. Commit rechecks identity, state, duplicates
-// and quotas so revocation/review during transfer cannot bypass authorization.
+// Reading the mobile connection and object I/O deliberately happen outside the
+// transaction. Commit rechecks identity, state, duplicates and quotas so
+// revocation/review during transfer cannot bypass authorization.
 func (a *App) uploadHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
 	defer cancel()
@@ -130,17 +137,8 @@ func (a *App) uploadHTTP(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	scan, err := a.Objects.Scan(ctx, data)
-	if err != nil {
-		status, code := 503, "scan_failed"
-		if scan == "rejected" {
-			status, code = 422, "malware_rejected"
-		}
-		writeError(w, fail(status, code, err.Error()))
-		return
-	}
 	sum := sha256.Sum256(data)
-	prepared := domain.DocumentFile{ID: domain.ID(), Name: name, MIMEType: kind, Size: int64(len(data)), CreatedAt: domain.Now(), ScanStatus: scan, SHA256: hex.EncodeToString(sum[:])}
+	prepared := domain.DocumentFile{ID: domain.ID(), Name: name, MIMEType: kind, Size: int64(len(data)), CreatedAt: domain.Now(), ScanStatus: domain.ScanUnscanned, SHA256: hex.EncodeToString(sum[:])}
 	prepared.ObjectKey = initial.OrgID + "/" + initial.ID + "/" + prepared.ID
 	if a.Config.AIReview {
 		prepared.Analysis = &domain.Analysis{Status: "queued", RequestedAt: domain.Now()}

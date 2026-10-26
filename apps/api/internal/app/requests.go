@@ -196,7 +196,7 @@ func (a *App) review(c *call) (any, error) {
 		}
 		available := false
 		for _, f := range item.Files {
-			if !f.Superseded && (f.ScanStatus == "clean" || f.Sample || a.Config.Env == "development" && f.ScanStatus == "unscanned_development") {
+			if !f.Superseded && a.readableFile(f) {
 				available = true
 			}
 		}

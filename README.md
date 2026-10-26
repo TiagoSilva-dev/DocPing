@@ -2,7 +2,7 @@
 
 Peça uma vez. Acompanhe tudo. Um monólito modular para coletar e conferir documentos de clientes de escritórios contábeis.
 
-**Estado: base funcional do MVP, com fluxo completo implementado. Ainda não homologado para documentos reais ou pilotos pagos.** O frontend compila e os testes de código/API passam. A integração local com Docker, MySQL, MinIO, Mailpit e ClamAV passou. Validação visual/Playwright, infraestrutura de produção e recuperação de backups permanecem pendentes. Não há declaração de conformidade LGPD ou prontidão de produção.
+**Estado: base funcional do MVP, com fluxo completo implementado. Ainda não homologado para documentos reais ou pilotos pagos.** O frontend compila e os testes de código/API passam. A integração local com Docker, MySQL, MinIO e Mailpit passou. **Não há varredura antivírus:** o ClamAV foi removido do produto e da infraestrutura por custo, e o que protege o upload é a verificação de tipo por conteúdo e extensão, o limite de tamanho, o bucket privado e a sessão. Validação visual/Playwright, infraestrutura de produção e recuperação de backups permanecem pendentes. Não há declaração de conformidade LGPD ou prontidão de produção.
 
 ## Executar localmente
 
@@ -36,7 +36,7 @@ npm run dev:web
 
 O comando de cópia preserva um `.env` existente. Nesta sessão ele já foi criado com valores aleatórios locais. Não troque senhas de um banco persistido sem atualizar também as credenciais no MySQL.
 
-Serviços: API `8080` (ou `API_HOST_PORT`), MySQL `3306`, MinIO `9000`/console `9001`, Mailpit `8025` e ClamAV na rede interna. As portas publicadas ficam em loopback. A API executa a migração versionada na inicialização; se o scanner ainda estiver atualizando, o upload falha com mensagem e pode ser repetido. Não libera arquivos sem verificação nesse modo.
+Serviços: API `8080` (ou `API_HOST_PORT`), MySQL `3306`, MinIO `9000`/console `9001` e Mailpit `8025`. As portas publicadas ficam em loopback. A API executa a migração versionada na inicialização.
 
 Para executar também o frontend em container:
 
@@ -99,7 +99,7 @@ go test -race ./...
 go vet ./...
 ```
 
-Os testes Go usam HTTP real de teste, arquivos sintéticos, fixture SMTP e fixture do protocolo ClamAV. Cobrem autenticação, CSRF, segregação, uploads, correção/reenvio, fechamento, limites, concorrência, expiração/revogação, CSV, recorrência e lembretes. Não substituem a homologação com os serviços de produção.
+Os testes Go usam HTTP real de teste, arquivos sintéticos e fixture SMTP. Cobrem autenticação, CSRF, segregação, uploads, correção/reenvio, fechamento, limites, concorrência, expiração/revogação, CSV, recorrência e lembretes. Não substituem a homologação com os serviços de produção.
 
 A análise automática tem testes de unidade da composição do veredito, dos clientes HTTP (Docling, PaddleOCR e TypeSafe em servidores de teste) e do worker que aplica ou não o resultado. **Os serviços reais — docling-serve, PaddleOCR e a API da TypeSafe — não foram executados nesta entrega:** não há medição de acurácia, latência, custo por documento nem calibração dos limiares em documentos reais. Antes de ligar o modo automático em um escritório, isso precisa ser feito.
 
@@ -114,12 +114,12 @@ MYSQL_TEST_DSN='<dsn-do-banco-de-teste>' go test ./internal/persistence -run MyS
 +Com os containers saudáveis:
 +
 +```sh
-+node scripts/integration-smoke.mjs --mysql --eicar
++node scripts/integration-smoke.mjs --mysql
 +```
 +
-+Foram executados e passaram **18 cenários** contra MySQL, MinIO, ClamAV e Mailpit reais: upload de PDF/PNG verificado, arquivos privados, SMTP, isolamento, correção por arquivo, reenvio, conclusão, ZIP, OTP por navegador, revogação e rejeição de uma fixture EICAR incorporada em PDF, sem persistir o arquivo. O teste direto MySQL também passou, sem skip. O script lê o `.env` sem imprimir segredos e aceita somente endpoints locais. Relatório sanitizado em `test-results/integration-smoke.json`.
++Foram executados e passaram **18 cenários** contra MySQL, MinIO, ClamAV e Mailpit reais: upload de PDF/PNG, arquivos privados, SMTP, isolamento, correção por arquivo, reenvio, conclusão, ZIP, OTP por navegador, revogação e, à época, a rejeição de uma fixture EICAR incorporada em PDF. O teste direto MySQL também passou, sem skip. O script lê o `.env` sem imprimir segredos e aceita somente endpoints locais. Relatório sanitizado em `test-results/integration-smoke.json`.
 +
-+A fixture EICAR usa um arquivo incorporado em PDF válido; a primeira tentativa com assinatura apenas anexada após o EOF não era adequada e foi corrigida antes da rodada aprovada. Esse teste de assinatura não prova detecção de todas as ameaças.
++Depois da remoção do ClamAV o script ficou com **17 cenários** — os dois do scanner e a opção `--eicar` saíram — e foi **reexecutado em 26/10/2026 contra MySQL 8, MinIO e Mailpit reais: 17/17 passaram em 10 segundos**, incluindo `TestMySQLRoundTrip` sem skip. Os arquivos enviados nessa rodada ficaram gravados como `unscanned`, confirmado no banco. O mesmo run exigiu ensinar ao script o cadastro com confirmação de e-mail, que ele não conhecia desde que essa etapa entrou na API.
 +
 +### Interface ponta a ponta
 

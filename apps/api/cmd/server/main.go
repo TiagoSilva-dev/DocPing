@@ -30,7 +30,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	startup, cancel := context.WithTimeout(ctx, 30*time.Second)
-	objects, err := storage.New(startup, config.DataDir, config.S3Endpoint, config.S3Bucket, config.S3Access, config.S3Secret, config.Scanner, config.Env, config.AllowUnscanned, config.S3AcceptUnconfirmedEncryption)
+	objects, err := storage.New(startup, config.DataDir, config.S3Endpoint, config.S3Bucket, config.S3Access, config.S3Secret, config.Env, config.S3AcceptUnconfirmedEncryption)
 	cancel()
 	if err != nil {
 		log.Fatal("private storage unavailable: ", err)

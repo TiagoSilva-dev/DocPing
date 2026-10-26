@@ -24,21 +24,21 @@ go test ./internal/app -run TestName -v                                   # sing
 MYSQL_TEST_DSN='<disposable-db-dsn>' go test ./internal/persistence -run MySQL -v   # opt-in
 ```
 
-Full local stack (Docker: MySQL, MinIO, Mailpit, ClamAV) and the real-infrastructure
+Full local stack (Docker: MySQL, MinIO, Mailpit) and the real-infrastructure
 smoke test:
 
 ```sh
 cp -n .env.example .env   # replace change-me values
 docker compose up --build -d
 docker compose --profile web up --build -d          # also serve the web app via Nginx
-node scripts/integration-smoke.mjs --mysql --eicar  # 18 scenarios against real services
+node scripts/integration-smoke.mjs --mysql          # 17 scenarios against real services
 ```
 
 Vitest is `environment: node` — the unit tests cover pure logic (CSV parsing, date
 math, notification derivation), not components. Playwright projects are filtered by
 `@desktop` / `@mobile` tags in the spec titles.
 
-`npm run dev` forces `APP_ENV=development STORE_DRIVER=json ALLOW_UNSCANNED_UPLOADS=true`.
+`npm run dev` forces `APP_ENV=development STORE_DRIVER=json`.
 Restart it after changing Go; Vite hot-reloads the frontend. Use `localhost:5173` exactly —
 the server validates the request origin against `WEB_ORIGIN`.
 
@@ -97,14 +97,21 @@ before scale; do not add features that depend on loading all state.
 
 ### Files and uploads
 
-`internal/storage/storage.go` wraps private S3/MinIO (or a local dir in development) and
-the ClamAV protocol. The DB stores only opaque key, SHA-256, size, MIME and `scanStatus`;
-bytes never touch MySQL and objects are never public. Uploads read the body, detect the
-type by content *and* extension (`detectFile`: PDF/JPG/PNG/HEIC only) and scan **outside**
-the transaction; the commit re-checks identity, token validity, item state, content
-deduplication and quotas, and orphan objects are cleaned up on failure. The scanner fails
-closed: the only bypass is `ALLOW_UNSCANNED_UPLOADS=true` in development, which marks files
-`unscanned_development`.
+`internal/storage/storage.go` wraps private S3/MinIO (or a local dir in development). The
+DB stores only opaque key, SHA-256, size, MIME and `scanStatus`; bytes never touch MySQL
+and objects are never public. Uploads read the body and detect the type by content *and*
+extension (`detectFile`: PDF/JPG/PNG/HEIC only) **outside** the transaction; the commit
+re-checks identity, token validity, item state, content deduplication and quotas, and
+orphan objects are cleaned up on failure.
+
+There is **no malware scanning**. ClamAV was removed deliberately — it cost more RAM than
+the rest of the stack together — so uploads are stored as `domain.ScanUnscanned`
+(`"unscanned"`) and what guards the upload is the type check, the size limit, the private
+bucket and the session. `scanStatus` survives because stored files still carry `clean` or
+`unscanned_development` from when the scanner existed, and `readableFile` is the one rule
+that decides what may be opened: an allow-list, so no legacy quarantine value reads as
+readable. Do not reintroduce a claim of antivirus anywhere user-visible without
+reintroducing a scanner.
 
 Production also demands the provider confirm SSE-S3 (`AES256`) on each object, deleting
 it and failing when it does not. `S3_ACCEPT_UNCONFIRMED_ENCRYPTION=true` is a deliberate,
@@ -157,7 +164,7 @@ amount of state in a store that loads all of it per transaction.
 ### Config is the safety boundary
 
 `internal/app/config.go` refuses to start when `APP_ENV=production` lacks HTTPS origin,
-verified-TLS MySQL, private S3, ClamAV or TLS SMTP, or when any development bypass is
+verified-TLS MySQL, private S3 or a way to send e-mail, or when any development bypass is
 set. Mail has two transports and production needs one of them, not a specific one:
 `RESEND_API_KEY` sends over HTTPS and wins when set, SMTP stays for the local
 Mailpit stack, and `Config.Sender()` resolves `MAIL_FROM` falling back to

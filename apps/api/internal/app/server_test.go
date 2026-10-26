@@ -30,7 +30,7 @@ func setup(t *testing.T) (*App, http.Handler) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	obj, err := storage.New(context.Background(), dir, "", "", "", "", "", "development", true, false)
+	obj, err := storage.New(context.Background(), dir, "", "", "", "", "development", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -295,18 +295,10 @@ func TestRecurrenceIdempotencyAndMonthBoundary(t *testing.T) {
 		return nil
 	})
 }
-func TestScannerFailsClosedAndJSONProductionRejected(t *testing.T) {
+func TestJSONProductionRejected(t *testing.T) {
 	dir := t.TempDir()
 	if _, err := persistence.Open("json", "", filepath.Join(dir, "state.json"), "production"); err == nil {
 		t.Fatal("production JSON allowed")
-	}
-	obj, err := storage.New(context.Background(), dir, "", "", "", "", "", "development", false, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	status, err := obj.Scan(context.Background(), samplePDF())
-	if err == nil || status != "quarantined" {
-		t.Fatal("scanner silently bypassed")
 	}
 }
 

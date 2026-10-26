@@ -14,13 +14,15 @@ Se a porta 8080 já estiver ocupada, configure `API_HOST_PORT=18080` no `.env`. 
 
 Para executar também o frontend estático em container, use `docker compose --env-file .env --profile web up --build -d` e abra `http://localhost:5173`. Esse perfil compila o React e usa Nginx para o fallback de rotas e proxy `/api`; não inicie o Vite ao mesmo tempo na porta 5173. O proxy usa HTTP/1.1, transmite upload/download sem buffering de disco, desabilita cache da API e preserva cookies de sessão/portal. A landing e rotas do cliente têm `no-store` e política de referência que não expõe tokens. Não inclui TLS de produção. Comportamento de streaming configurado conforme a [documentação oficial do proxy Nginx](https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_request_buffering).
 
-API usa nomes internos `mysql`, `minio`, `mailpit`, `clamav`. `WEB_ORIGIN` deve coincidir com a origem em que o app é aberto. Em desenvolvimento os apelidos de loopback equivalentes (`localhost`, `127.0.0.1`, `[::1]`) e a porta da própria API são aceitos automaticamente, de modo que abrir `http://127.0.0.1:5173` não devolve mais `origin_rejected`. Para qualquer outro endereço — o IP da máquina na rede local, usado para testar no celular, ou a porta publicada da API quando `API_HOST_PORT` difere de 8080 — liste a origem em `WEB_ORIGINS` (separadas por vírgula). Em produção a lista é exata e exige HTTPS em todas as entradas.
+API usa nomes internos `mysql`, `minio`, `mailpit`. `WEB_ORIGIN` deve coincidir com a origem em que o app é aberto. Em desenvolvimento os apelidos de loopback equivalentes (`localhost`, `127.0.0.1`, `[::1]`) e a porta da própria API são aceitos automaticamente, de modo que abrir `http://127.0.0.1:5173` não devolve mais `origin_rejected`. Para qualquer outro endereço — o IP da máquina na rede local, usado para testar no celular, ou a porta publicada da API quando `API_HOST_PORT` difere de 8080 — liste a origem em `WEB_ORIGINS` (separadas por vírgula). Em produção a lista é exata e exige HTTPS em todas as entradas.
 
 `TRUSTED_PROXY_CIDRS` define quais faixas de proxy podem informar o endereço do cliente por `X-Forwarded-For`. O perfil `web` já define as faixas privadas do Compose, porque o Nginx encaminha todo o tráfego e, sem isso, todos os visitantes dividiriam um único limite de requisições por IP. Credenciais do MinIO ficam apenas no servidor. O backend aplica as migrações e inicializa o bucket apenas em desenvolvimento. Em produção, o bucket privado deve existir e estar configurado antes de iniciar a API.
 
-Primeiro build do MinIO compila a fonte fixada e pode levar minutos. ClamAV pode atualizar assinaturas na primeira execução e ainda não aceitar varreduras; a API inicia após o healthcheck `clamdcheck.sh` confirmar o scanner, com seis minutos de tolerância inicial. Uma varredura posterior sem resultado válido continua falhando fechada. A documentação oficial recomenda 3–4 GiB de RAM para o scanner. [ClamAV Docker](https://docs.clamav.net/manual/Installing/Docker.html).
+Primeiro build do MinIO compila a fonte fixada e pode levar minutos.
 
-Mailpit captura mensagens localmente: aceitação nessa caixa não prova entrega para um e-mail real. Não configurar encaminhamento externo para testes. A porta do scanner não é publicada, para evitar um daemon de leitura/varredura exposto no host.
+**Não há antivírus no Compose.** O serviço `clamav` foi removido em 26/10/2026 por custo de infraestrutura — ele pedia 4 GiB de RAM, mais que o restante da pilha somada. Todo upload é gravado como `unscanned` e nenhum arquivo é varrido; `CLAMAV_ADDRESS` e `ALLOW_UNSCANNED_UPLOADS` não existem mais. O risco está registrado em `docs/05-seguranca-e-piloto.md`.
+
+Mailpit captura mensagens localmente: aceitação nessa caixa não prova entrega para um e-mail real. Não configurar encaminhamento externo para testes.
 
 Volumes nomeados preservam banco, objetos, e-mails e assinaturas entre reinícios. `docker compose down` conserva volumes; não usar `down -v` sem aceitar a perda dos dados locais. Arquivos sintéticos devem ficar separados dos ambientes comerciais.
 
@@ -45,7 +47,7 @@ As duas portas são publicadas **apenas em `127.0.0.1`** (`5001` para o Docling,
 
 A release oficial Community `RELEASE.2025-10-15T17-29-55Z` corrige um problema de segurança e orienta compilar containers da fonte. O repositório encontra-se arquivado em abril de 2026. `infra/minio.Dockerfile` fixa essa release em vez de depender de uma imagem antiga sem essa correção. Isso é um recurso **local**, não garantia de manutenção futura. Para piloto, escolher storage compatível com S3 mantido, privado e criptografado. [Release oficial, consulta em 19/10/2026](https://github.com/minio/minio/releases/tag/RELEASE.2025-10-15T17-29-55Z).
 
-MySQL `8.0` acompanha correções de sua linha. ClamAV usa a imagem **oficial Debian `1.4.6-debian`**, com índice multi-arquitetura fixado em `sha256:c7df83a4c9794aeb43b7cff296fc9f42a0f47cbf0e96704510e7e5b57b2f4913`, verificado diretamente no registry; inclui Linux AMD64, ARM64 e PPC64LE. A variante Alpine `1.4_base` não ofereceu ARM64 no teste e foi substituída, permitindo execução nativa em Apple Silicon. Atualizar tag+digest exige nova homologação de scanner e assinaturas. [Fontes oficiais das imagens ClamAV](https://github.com/Cisco-Talos/clamav-docker).
+MySQL `8.0` acompanha correções de sua linha.
 
 Mailpit está fixado em `v1.31.6`, conferido na [release oficial](https://github.com/axllent/mailpit/releases/tag/v1.31.6). Build, subida e integração do conjunto local foram executados nesta entrega, conforme o registro abaixo; homologação de produção continua separada.
 
@@ -57,13 +59,13 @@ No diretório `apps/api`, após instalar Go e dependências:
 
 ```sh
 APP_ENV=development STORE_DRIVER=json DATA_DIR=../../.local-data \
-  WEB_ORIGIN=http://localhost:5173 ALLOW_UNSCANNED_UPLOADS=true \
+  WEB_ORIGIN=http://localhost:5173 \
   go run ./cmd/server
 ```
 
-`ALLOW_UNSCANNED_UPLOADS=true` permite somente experimentar o fluxo com arquivos sintéticos e marca a ausência de varredura. Deixar SMTP/S3/ClamAV sem configuração não significa que estejam funcionando. O envio de e-mail deve falhar explicitamente sem servidor; nunca indicar aceitação sem SMTP.
+Deixar SMTP/S3 sem configuração não significa que estejam funcionando. O envio de e-mail deve falhar explicitamente sem servidor; nunca indicar aceitação sem SMTP.
 
-JSON/local não valida SQL, transações, concorrência, bucket S3, scanner ou e-mail. A integração local com MySQL+storage+scanner+SMTP foi executada separadamente. Antes de piloto real, repetir a homologação no ambiente escolhido, testar restauração e fechar os gates de `docs/05-seguranca-e-piloto.md`.
+JSON/local não valida SQL, transações, concorrência, bucket S3 ou e-mail. A integração local com MySQL+storage+SMTP foi executada separadamente. Antes de piloto real, repetir a homologação no ambiente escolhido, testar restauração e fechar os gates de `docs/05-seguranca-e-piloto.md`.
 
 ## Configuração de produção
 
@@ -90,14 +92,16 @@ A Hostinger também oferece uma API HTTP (`api.mail.hostinger.com`, do Agentic M
 
 Não foi enviada nenhuma mensagem real na verificação de handshake: credenciais, aceitação do alias como remetente, entrega na caixa de entrada e reputação (SPF, DKIM, DMARC do domínio) dependem do teste opt-in acima.
 
-Separar secrets do repositório, `APP_ENV=production`, `STORE_DRIVER=mysql`, DSN com TLS, origem HTTPS, bucket privado com criptografia, credencial de mínimo privilégio, scanner atualizado e provedor SMTP autenticado com transporte seguro. O modo JSON, storage local e aceite de arquivo não verificado devem ser recusados na inicialização de produção. TLS/CSRF, backups, retenção, alertas e teste de recuperação são requisitos adicionais; este Compose não os fornece.
+Separar secrets do repositório, `APP_ENV=production`, `STORE_DRIVER=mysql`, DSN com TLS, origem HTTPS, bucket privado com criptografia, credencial de mínimo privilégio e provedor SMTP autenticado com transporte seguro. O modo JSON e o storage local devem ser recusados na inicialização de produção. TLS/CSRF, backups, retenção, alertas e teste de recuperação são requisitos adicionais; este Compose não os fornece.
 
-Não publicar portas de MySQL, console S3, Mailpit ou ClamAV. Um proxy HTTPS pode servir aplicação e API na mesma origem; sem microserviços nem fila adicional. Monólito e jobs devem continuar idempotentes ao reiniciar.
+Não publicar portas de MySQL, console S3 ou Mailpit. Um proxy HTTPS pode servir aplicação e API na mesma origem; sem microserviços nem fila adicional. Monólito e jobs devem continuar idempotentes ao reiniciar.
 
 ## Validação desta sessão
 
 Em 19–20/10/2026, Compose validou com e sem o perfil `web`; o daemon Docker foi iniciado e o conjunto foi compilado e subiu saudável. O frontend Nginx respondeu HTTP 200 em `http://localhost:5173` e o proxy `/api/health` também respondeu 200.
 
 `node scripts/integration-smoke.mjs --mysql --eicar` passou **18 verificações** contra API Go, MySQL 8, MinIO, ClamAV e Mailpit reais. Incluiu cadastro/sessão, cliente/modelo/solicitação persistidos, CSRF, isolamento entre escritórios, PDF/PNG passando pelo scanner e storage, rejeição da assinatura inofensiva EICAR embutida em PDF sem persistência, bloqueio de acesso anônimo, e-mail aceito e presente no Mailpit, correção sem descartar outro arquivo, aprovação/conclusão, ZIP, código sensível por navegador, revogação e `TestMySQLRoundTrip` real sem skip. Relatório: `test-results/integration-smoke.json`.
+
+**Essa rodada é anterior à remoção do ClamAV (26/10/2026).** Depois dela o script ficou com 17 verificações, sem os dois cenários de scanner e sem a opção `--eicar`. Em 26/10/2026 `node scripts/integration-smoke.mjs --mysql` foi executado contra o Compose sem o serviço `clamav` e **as 17 passaram**, com os arquivos enviados gravando `unscanned`. Relatório: [docs/validation/integration-smoke.json](../docs/validation/integration-smoke.json).
 
 Esse teste usa arquivos sintéticos e SMTP local. Não comprova TLS/SSE do ambiente comercial, entrega externa de e-mail, restauração de backup ou experiência visual/mobile. A checagem de configuração SSE de produção usa mock em três casos e precisa de homologação em storage real com criptografia. Fluxos de navegador permanecem sem validação: a tentativa Playwright falhou ao iniciar Chromium (`EPERM`), antes de abrir telas; a ferramenta de navegação também bloqueou o endereço após autorização. Consulte os resultados finais em `docs/06-validacao-da-entrega.md`.

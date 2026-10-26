@@ -410,12 +410,9 @@ export function RequestDetail() {
                       }
                     />
                   )}
-                  {(file.sample ||
-                    file.scanStatus === "unscanned_development") && (
+                  {file.sample && (
                     <div className="sample-file-note">
-                      {file.sample
-                        ? "Documento fictício para explorar a demonstração."
-                        : "Ambiente local: este arquivo ainda não passou por verificação antivírus."}
+                      Documento fictício para explorar a demonstração.
                     </div>
                   )}
                 </>

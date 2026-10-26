@@ -2,58 +2,13 @@ package storage
 
 import (
 	"context"
-	"encoding/binary"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"io"
-	"net"
 	"net/http"
 	"strings"
 	"testing"
 )
-
-func TestClamAVProtocolFailClosed(t *testing.T) {
-	for _, tc := range []struct {
-		reply, status string
-		wantError     bool
-	}{{"stream: OK\x00", "clean", false}, {"stream: Eicar-Test-Signature FOUND\x00", "rejected", true}, {"stream: INSTREAM size limit exceeded. ERROR\x00", "quarantined", true}} {
-		t.Run(tc.status, func(t *testing.T) {
-			listener, err := net.Listen("tcp", "127.0.0.1:0")
-			if err != nil {
-				t.Skip("local listener unavailable:", err)
-			}
-			defer listener.Close()
-			go func() {
-				conn, err := listener.Accept()
-				if err != nil {
-					return
-				}
-				defer conn.Close()
-				command := make([]byte, 10)
-				_, _ = io.ReadFull(conn, command)
-				if string(command) != "zINSTREAM\x00" {
-					return
-				}
-				for {
-					var size uint32
-					if binary.Read(conn, binary.BigEndian, &size) != nil {
-						return
-					}
-					if size == 0 {
-						break
-					}
-					_, _ = io.CopyN(io.Discard, conn, int64(size))
-				}
-				_, _ = conn.Write([]byte(tc.reply))
-			}()
-			o := &Objects{scanner: listener.Addr().String()}
-			status, err := o.Scan(context.Background(), []byte("sample"))
-			if status != tc.status || (err != nil) != tc.wantError {
-				t.Fatalf("status=%s error=%v", status, err)
-			}
-		})
-	}
-}
 
 type fakeRoundTripper func(*http.Request) (*http.Response, error)
 

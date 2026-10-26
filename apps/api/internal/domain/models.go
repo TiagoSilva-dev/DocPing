@@ -106,6 +106,12 @@ type Template struct {
 	Active      bool           `json:"active"`
 	CreatedAt   string         `json:"createdAt"`
 }
+
+// ScanUnscanned is the only status an upload is stored with: the product has no
+// malware scanner. The field remains because stored files still carry what the
+// scanner wrote while it existed.
+const ScanUnscanned = "unscanned"
+
 type DocumentFile struct {
 	ID         string    `json:"id"`
 	Name       string    `json:"name"`

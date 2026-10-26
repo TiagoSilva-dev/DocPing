@@ -2587,7 +2587,9 @@
           },
           "scanStatus": {
             "type": "string",
+            "description": "Uploads are not scanned for malware: novos arquivos nascem \"unscanned\". Os demais valores existem apenas em arquivos gravados antes da remoção do antivírus.",
             "enum": [
+              "unscanned",
               "clean",
               "sample",
               "unscanned_development"

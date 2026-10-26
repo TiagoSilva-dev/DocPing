@@ -30,10 +30,9 @@ const api = spawn("go", ["run", "./cmd/server"], {
     ...fileEnv,
     ...process.env,
     // Development forces the safe local defaults regardless of .env: JSON
-    // store, synthetic uploads and the Vite origin.
+    // store and the Vite origin.
     APP_ENV: process.env.APP_ENV || "development",
     STORE_DRIVER: process.env.STORE_DRIVER || "json",
-    ALLOW_UNSCANNED_UPLOADS: process.env.ALLOW_UNSCANNED_UPLOADS || "true",
     WEB_ORIGIN: process.env.WEB_ORIGIN || "http://localhost:5173",
     // The extraction services publish on loopback for this mode; inside the
     // Compose network they answer on docling:5001 and paddleocr:8080.

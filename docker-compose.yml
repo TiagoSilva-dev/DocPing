@@ -37,8 +37,6 @@ services:
       SMTP_PORT: "1025"
       SMTP_FROM: ${SMTP_FROM:-docping@localhost}
       SMTP_REQUIRE_TLS: "false"
-      CLAMAV_ADDRESS: clamav:3310
-      ALLOW_UNSCANNED_UPLOADS: "false"
       CLIENT_LIMIT: ${CLIENT_LIMIT:-30}
       MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-20971520}
       MAX_ORG_STORAGE_BYTES: ${MAX_ORG_STORAGE_BYTES:-1073741824}
@@ -64,8 +62,6 @@ services:
         condition: service_healthy
       mailpit:
         condition: service_started
-      clamav:
-        condition: service_healthy
     restart: unless-stopped
 
   # Extração de texto. Ambos ficam no perfil "ai" porque baixam modelos
@@ -164,20 +160,6 @@ services:
       - mailpit_data:/data
     restart: unless-stopped
 
-  clamav:
-    # Debian oficial multi-arquitetura; a variante Alpine não oferece ARM64.
-    image: clamav/clamav:1.4.6-debian@sha256:c7df83a4c9794aeb43b7cff296fc9f42a0f47cbf0e96704510e7e5b57b2f4913
-    volumes:
-      - clamav_data:/var/lib/clamav
-    healthcheck:
-      test: ["CMD", "clamdcheck.sh"]
-      interval: 15s
-      timeout: 10s
-      retries: 20
-      start_period: 6m
-    # Porta de varredura permanece apenas na rede interna do Compose.
-    restart: unless-stopped
-
 volumes:
   api_data:
   docling_models:
@@ -185,4 +167,3 @@ volumes:
   mysql_data:
   minio_data:
   mailpit_data:
-  clamav_data:

@@ -15,8 +15,8 @@ import (
 )
 
 type Config struct {
-	Env, Port, Origin, Driver, DSN, MySQLCACert, DataDir, S3Endpoint, S3Bucket, S3Access, S3Secret, Scanner, SMTPHost, SMTPPort, SMTPFrom, SMTPUser, SMTPPass string
-	SMTPRequireTLS, AllowUnscanned, S3AcceptUnconfirmedEncryption                                                                                             bool
+	Env, Port, Origin, Driver, DSN, MySQLCACert, DataDir, S3Endpoint, S3Bucket, S3Access, S3Secret, SMTPHost, SMTPPort, SMTPFrom, SMTPUser, SMTPPass string
+	SMTPRequireTLS, S3AcceptUnconfirmedEncryption                                                                                                    bool
 	// SMTPTLSMode is how the connection reaches TLS: "starttls" upgrades a
 	// plain connection (port 587 and most providers), "implicit" speaks TLS
 	// from the first byte (port 465, which Hostinger recommends). Reading the
@@ -242,7 +242,7 @@ func LoadConfig() (Config, error) {
 	unverifiedHours, _ := strconv.Atoi(env("UNVERIFIED_TTL_HOURS", "168"))
 	demoMax, _ := strconv.Atoi(env("DEMO_MAX_ACTIVE", "200"))
 	demoRate, _ := strconv.Atoi(env("DEMO_RATE_PER_HOUR", "3"))
-	c := Config{Env: env("APP_ENV", "production"), Port: env("PORT", "8080"), Origin: env("WEB_ORIGIN", env("FRONTEND_URL", "http://localhost:5173")), Driver: env("STORE_DRIVER", "mysql"), DSN: env("MYSQL_DSN", os.Getenv("DATABASE_DSN")), MySQLCACert: os.Getenv("MYSQL_CA_CERT"), DataDir: env("DATA_DIR", ".data"), S3Endpoint: os.Getenv("S3_ENDPOINT"), S3Bucket: env("S3_BUCKET", "docping"), S3Access: os.Getenv("S3_ACCESS_KEY"), S3Secret: os.Getenv("S3_SECRET_KEY"), Scanner: os.Getenv("CLAMAV_ADDRESS"), AllowUnscanned: os.Getenv("ALLOW_UNSCANNED_UPLOADS") == "true", S3AcceptUnconfirmedEncryption: os.Getenv("S3_ACCEPT_UNCONFIRMED_ENCRYPTION") == "true", SMTPHost: os.Getenv("SMTP_HOST"), SMTPPort: env("SMTP_PORT", "1025"), SMTPFrom: os.Getenv("SMTP_FROM"), SMTPUser: os.Getenv("SMTP_USERNAME"), SMTPPass: os.Getenv("SMTP_PASSWORD"), SMTPRequireTLS: env("SMTP_REQUIRE_TLS", "true") == "true", SMTPTLSMode: resolveSMTPTLSMode(os.Getenv("SMTP_TLS_MODE"), env("SMTP_PORT", "1025")), MaxUpload: maxBytes, MaxOrgBytes: orgBytes, MaxRequestBytes: requestBytes, ClientLimit: limit, Location: loc, AIReview: os.Getenv("AI_REVIEW_ENABLED") == "true", DoclingURL: os.Getenv("DOCLING_URL"), DoclingKey: os.Getenv("DOCLING_API_KEY"), DoclingLang: env("DOCLING_OCR_LANG", "pt"), PaddleURL: os.Getenv("PADDLEOCR_URL"), JevURL: env("TYPESAFE_API_URL", "https://api.typesafe.ai"), JevKey: os.Getenv("TYPESAFE_API_KEY"), JevModel: env("TYPESAFE_MODEL", "jev-latest"), AIMaxChars: aiChars, AIApprove: aiApprove, AIReject: aiReject, DemoTTL: time.Duration(demoHours) * time.Hour, UnverifiedTTL: time.Duration(unverifiedHours) * time.Hour, DemoMaxActive: demoMax, ResendKey: strings.TrimSpace(os.Getenv("RESEND_API_KEY")), MailFrom: strings.TrimSpace(os.Getenv("MAIL_FROM")), DemoRateHourly: demoRate, StripeKey: strings.TrimSpace(os.Getenv("STRIPE_SECRET_KEY")), StripeWebhookSecret: strings.TrimSpace(os.Getenv("STRIPE_WEBHOOK_SECRET")), Prices: prices}
+	c := Config{Env: env("APP_ENV", "production"), Port: env("PORT", "8080"), Origin: env("WEB_ORIGIN", env("FRONTEND_URL", "http://localhost:5173")), Driver: env("STORE_DRIVER", "mysql"), DSN: env("MYSQL_DSN", os.Getenv("DATABASE_DSN")), MySQLCACert: os.Getenv("MYSQL_CA_CERT"), DataDir: env("DATA_DIR", ".data"), S3Endpoint: os.Getenv("S3_ENDPOINT"), S3Bucket: env("S3_BUCKET", "docping"), S3Access: os.Getenv("S3_ACCESS_KEY"), S3Secret: os.Getenv("S3_SECRET_KEY"), S3AcceptUnconfirmedEncryption: os.Getenv("S3_ACCEPT_UNCONFIRMED_ENCRYPTION") == "true", SMTPHost: os.Getenv("SMTP_HOST"), SMTPPort: env("SMTP_PORT", "1025"), SMTPFrom: os.Getenv("SMTP_FROM"), SMTPUser: os.Getenv("SMTP_USERNAME"), SMTPPass: os.Getenv("SMTP_PASSWORD"), SMTPRequireTLS: env("SMTP_REQUIRE_TLS", "true") == "true", SMTPTLSMode: resolveSMTPTLSMode(os.Getenv("SMTP_TLS_MODE"), env("SMTP_PORT", "1025")), MaxUpload: maxBytes, MaxOrgBytes: orgBytes, MaxRequestBytes: requestBytes, ClientLimit: limit, Location: loc, AIReview: os.Getenv("AI_REVIEW_ENABLED") == "true", DoclingURL: os.Getenv("DOCLING_URL"), DoclingKey: os.Getenv("DOCLING_API_KEY"), DoclingLang: env("DOCLING_OCR_LANG", "pt"), PaddleURL: os.Getenv("PADDLEOCR_URL"), JevURL: env("TYPESAFE_API_URL", "https://api.typesafe.ai"), JevKey: os.Getenv("TYPESAFE_API_KEY"), JevModel: env("TYPESAFE_MODEL", "jev-latest"), AIMaxChars: aiChars, AIApprove: aiApprove, AIReject: aiReject, DemoTTL: time.Duration(demoHours) * time.Hour, UnverifiedTTL: time.Duration(unverifiedHours) * time.Hour, DemoMaxActive: demoMax, ResendKey: strings.TrimSpace(os.Getenv("RESEND_API_KEY")), MailFrom: strings.TrimSpace(os.Getenv("MAIL_FROM")), DemoRateHourly: demoRate, StripeKey: strings.TrimSpace(os.Getenv("STRIPE_SECRET_KEY")), StripeWebhookSecret: strings.TrimSpace(os.Getenv("STRIPE_WEBHOOK_SECRET")), Prices: prices}
 	if c.Env != "development" && c.Env != "production" && c.Env != "test" {
 		return c, errors.New("APP_ENV must be development or production")
 	}
@@ -262,8 +262,8 @@ func LoadConfig() (Config, error) {
 	// The mail rule is about having a way to send, not about which one: an
 	// HTTPS provider satisfies it on its own, and SMTP still has to be TLS
 	// when SMTP is the path being used.
-	if c.Env == "production" && (c.Driver != "mysql" || c.DSN == "" || c.S3Endpoint == "" || c.Scanner == "" || c.AllowUnscanned || !c.CanSendEmail() || c.SMTPHost != "" && !c.SMTPRequireTLS) {
-		return c, errors.New("production requires HTTPS WEB_ORIGIN, MySQL, private S3, ClamAV and a way to send e-mail (RESEND_API_KEY, or SMTP with TLS); development bypasses are forbidden")
+	if c.Env == "production" && (c.Driver != "mysql" || c.DSN == "" || c.S3Endpoint == "" || !c.CanSendEmail() || c.SMTPHost != "" && !c.SMTPRequireTLS) {
+		return c, errors.New("production requires HTTPS WEB_ORIGIN, MySQL, private S3 and a way to send e-mail (RESEND_API_KEY, or SMTP with TLS); development bypasses are forbidden")
 	}
 	if c.Env == "production" {
 		for _, origin := range c.Origins {

@@ -12,19 +12,18 @@ flowchart LR
   P[Portal mobile • link temporário] -->|REST + token limitado| A
   A --> D[(MySQL 8 • metadados)]
   A --> S[(S3 privado • arquivos)]
-  A --> V[ClamAV • varredura]
   A --> M[SMTP • e-mail]
   J[Jobs internos • recorrência e lembretes] --> A
 ```
 
 - `apps/web`: UI, layouts, páginas/fluxos, cliente HTTP, schemas, estilos e tokens.
 - `apps/api`: auth, organizações, clientes, modelos, solicitações, documentos, recorrência e comunicações, com regras validadas no servidor.
-- `infra`: execução local e imagens auxiliares. Compose inclui API, MySQL, MinIO, Mailpit e ClamAV.
+- `infra`: execução local e imagens auxiliares. Compose inclui API, MySQL, MinIO e Mailpit.
 - `docs`: produto, contratos, decisões e critérios de aceite.
 
 **Duas configurações explícitas:** `STORE_DRIVER=mysql` é o caminho de produção; `STORE_DRIVER=json` e arquivos privados locais existem somente para desenvolvimento sem Docker. Falha de MySQL não pode ativar JSON automaticamente. JSON não é validação de transações, concorrência SQL ou isolamento do banco em produção.
 
-**Arquivos fora do MySQL:** o banco guarda chave opaca, hash, tamanho, MIME, versão e resultado de varredura; os bytes ficam no storage privado. API autoriza o acesso antes de transmitir conteúdo ou emitir URL curta. Não retornar credenciais do bucket nem tornar objetos públicos. O cliente não escolhe caminho físico. Upload não verificado não pode ser apresentado como limpo.
+**Arquivos fora do MySQL:** o banco guarda chave opaca, hash, tamanho, MIME, versão e o campo `scanStatus`; os bytes ficam no storage privado. API autoriza o acesso antes de transmitir conteúdo ou emitir URL curta. Não retornar credenciais do bucket nem tornar objetos públicos. O cliente não escolhe caminho físico. **Não há varredura antivírus** — o ClamAV foi removido por custo de infraestrutura e todo upload é gravado como `unscanned`; nenhuma tela, documento ou material de venda pode apresentar o arquivo como verificado.
 
 **Comunicação verdadeira:** `accepted` significa aceito pelo SMTP/provedor; `delivered` exige evento próprio do provedor, indisponível em SMTP simples. Abrir WhatsApp é `manual_opened`, sem confirmação de envio. Rejeição/indisponibilidade fica visível e permite repetir com deduplicação.
 
@@ -60,13 +59,13 @@ Nomes físicos e detalhes finais devem acompanhar as migrações versionadas em 
 
 **Exclusão:** `save` só faz upsert — retirar uma entidade do estado em memória é invisível para o MySQL e a próxima leitura a traria de volta. Apagar de verdade exige `DELETE`, e por isso a exclusão não passa por `Run`: `Store.PurgeOrganizations` remove a organização e tudo o que ela possui em ordem filho-primeiro, porque o schema não declara `ON DELETE CASCADE` e uma tabela-pai apagada antes é recusada pela chave estrangeira. É o único caminho de exclusão hoje, usado pelo job que expira demonstrações e cadastros não confirmados. Os objetos no bucket são responsabilidade de quem chama, antes da remoção do estado.
 
-**Concorrência:** o armazenamento serializa transações curtas com mutex do processo e lock global de escrita. A leitura do upload, varredura e acesso ao objeto foram separados da transação; o commit revalida identidade, estado, duplicidade e quota, e limpa objetos não vinculados em caso de falha. SMTP executa após persistir a tentativa `pending`; depois registra `accepted` ou `failed`. Testes locais com upload/SMTP bloqueados verificaram que outra operação continua e que revogação durante upload impede o commit. Isso não substitui teste de carga com MySQL e storage reais.
+**Concorrência:** o armazenamento serializa transações curtas com mutex do processo e lock global de escrita. A leitura do upload e o acesso ao objeto foram separados da transação; o commit revalida identidade, estado, duplicidade e quota, e limpa objetos não vinculados em caso de falha. SMTP executa após persistir a tentativa `pending`; depois registra `accepted` ou `failed`. Testes locais com upload/SMTP bloqueados verificaram que outra operação continua e que revogação durante upload impede o commit. Isso não substitui teste de carga com MySQL e storage reais.
 
 `tax_id` é texto, nunca inteiro. Novas inscrições brasileiras podem ter CNPJ alfanumérico: preservar letras maiúsculas e normalizar apenas pontuação; não usar uma máscara que apague letras. Cadastro manual não depende de consulta externa à Receita. [Receita Federal, consulta em 19/10/2026](https://www.gov.br/receitafederal/pt-br/assuntos/noticias/2026/julho/antecipacao-de-atividades-para-implantacao-do-cnpj-alfanumerico).
 
 ## Transações e concorrência
 
-Criar solicitação, copiar itens e emitir acesso é uma unidade transacional. Aprovação/correção deve verificar organização, papel, arquivo atual, resultado de varredura e estado do item; recalcular progresso e conclusão na mesma transação. Uma atualização concorrente deve retornar conflito ou ser serializada, sem perder auditoria.
+Criar solicitação, copiar itens e emitir acesso é uma unidade transacional. Aprovação/correção deve verificar organização, papel, arquivo atual, legibilidade do arquivo (`readableFile`) e estado do item; recalcular progresso e conclusão na mesma transação. Uma atualização concorrente deve retornar conflito ou ser serializada, sem perder auditoria.
 
 Job mensal usa chave única regra+cliente+competência. Lock do job é uma otimização; a restrição continua protegendo a integridade. Reexecutar depois de falha cria somente os clientes faltantes. Lembretes precisam reservar uma entrega com chave única antes do envio; SMTP não garante exatamente uma entrega em toda falha de rede, portanto registrar resultado incerto e evitar promessa de entrega única absoluta.
 
