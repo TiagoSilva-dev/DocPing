@@ -7,13 +7,15 @@ package persistence
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"database/sql"
 	"docping/api/internal/domain"
 	"docping/api/migrations"
 	"encoding/json"
 	"errors"
 	"fmt"
-	_ "github.com/go-sql-driver/mysql"
+	"github.com/go-sql-driver/mysql"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,6 +28,35 @@ type Store struct {
 	file  string
 	db    *sql.DB
 	state *domain.State
+}
+
+// CATLSConfig names the DSN tls= mode that verifies the server against a CA
+// given by the operator instead of the system roots. It lives here, next to
+// the code that opens the connection, so that anything else which needs to
+// reach the same database -- a maintenance command, for instance -- registers
+// the very same anchor instead of a second copy of it.
+const CATLSConfig = "docping-ca"
+
+// RegisterCA makes that mode available for a PEM the operator supplied. It
+// changes which CA is trusted, never whether the certificate is checked: the
+// chain is verified and ServerName stays empty so the driver fills it with
+// the host from the DSN, keeping the hostname check. An unparsable CA is
+// refused, so the mode cannot decay into an unverified connection.
+func RegisterCA(pem string) error { return RegisterCAWithName(pem, "") }
+
+// RegisterCAWithName is the same, for the case where the certificate names a
+// host that is not the one being dialled. A managed database reached through
+// a TCP proxy answers on the proxy's address while presenting the private
+// hostname it was issued for, and an operator tool run from outside has to
+// say which name to expect. It is still a real check -- the chain is
+// verified and the name is matched -- so it is not a way around verification,
+// only a way to name the host the certificate was actually issued for.
+func RegisterCAWithName(pem, serverName string) error {
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM([]byte(pem)) {
+		return errors.New("MYSQL_CA_CERT must be a PEM-encoded certificate")
+	}
+	return mysql.RegisterTLSConfig(CATLSConfig, &tls.Config{RootCAs: pool, ServerName: serverName, MinVersion: tls.VersionTLS12})
 }
 
 func Open(driver, dsn, path, env string) (*Store, error) {
@@ -43,15 +74,19 @@ func Open(driver, dsn, path, env string) (*Store, error) {
 		if err = db.PingContext(ctx); err != nil {
 			return nil, err
 		}
-		for _, q := range strings.Split(migrations.SQL, ";") {
-			if strings.TrimSpace(q) != "" {
-				if _, err = db.ExecContext(ctx, q); err != nil {
-					return nil, fmt.Errorf("migration: %w", err)
+		for _, file := range migrations.Files() {
+			for _, q := range strings.Split(file, ";") {
+				if strings.TrimSpace(q) != "" {
+					if _, err = db.ExecContext(ctx, q); err != nil {
+						return nil, fmt.Errorf("migration: %w", err)
+					}
 				}
 			}
 		}
-		if _, err = db.ExecContext(ctx, "INSERT IGNORE INTO schema_migrations(version) VALUES(1)"); err != nil {
-			return nil, err
+		for v := 1; v <= migrations.Version; v++ {
+			if _, err = db.ExecContext(ctx, "INSERT IGNORE INTO schema_migrations(version) VALUES(?)", v); err != nil {
+				return nil, err
+			}
 		}
 		s.db = db
 	case "json":
@@ -81,43 +116,61 @@ func (s *Store) Close() error {
 	}
 	return nil
 }
+
+// clone returns an isolated copy of the cached state, so a handler that
+// fails mutates nothing. The caller must hold s.mu.
+func (s *Store) clone() (*domain.State, error) {
+	data, err := json.Marshal(s.state)
+	if err != nil {
+		return nil, err
+	}
+	next := domain.NewState()
+	if err = json.Unmarshal(data, next); err != nil {
+		return nil, err
+	}
+	return next, nil
+}
+
+// persist writes the state with temp-file+rename and only then publishes it as
+// the cached one, so an interrupted write leaves the previous file intact. The
+// caller must hold s.mu.
+func (s *Store) persist(next *domain.State) error {
+	data, err := json.Marshal(next)
+	if err != nil {
+		return err
+	}
+	tmp := s.file + ".tmp"
+	if err = os.WriteFile(tmp, data, 0600); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(tmp, os.O_RDWR, 0600)
+	if err != nil {
+		return err
+	}
+	err = f.Sync()
+	_ = f.Close()
+	if err != nil {
+		return err
+	}
+	if err = os.Rename(tmp, s.file); err != nil {
+		return err
+	}
+	s.state = next
+	return nil
+}
 func (s *Store) Run(ctx context.Context, write bool, fn func(*domain.State) error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.db == nil {
-		copyData, err := json.Marshal(s.state)
+		next, err := s.clone()
 		if err != nil {
-			return err
-		}
-		next := domain.NewState()
-		if err = json.Unmarshal(copyData, next); err != nil {
 			return err
 		}
 		if err = fn(next); err != nil {
 			return err
 		}
 		if write {
-			data, err := json.Marshal(next)
-			if err != nil {
-				return err
-			}
-			tmp := s.file + ".tmp"
-			if err = os.WriteFile(tmp, data, 0600); err != nil {
-				return err
-			}
-			f, err := os.OpenFile(tmp, os.O_RDWR, 0600)
-			if err != nil {
-				return err
-			}
-			err = f.Sync()
-			_ = f.Close()
-			if err != nil {
-				return err
-			}
-			if err = os.Rename(tmp, s.file); err != nil {
-				return err
-			}
-			s.state = next
+			return s.persist(next)
 		}
 		return nil
 	}
@@ -195,6 +248,8 @@ func load(ctx context.Context, tx *sql.Tx, s *domain.State) error {
 			return readMap(ctx, tx, "audit_events", s.Audits, func(x domain.Audit) string { return x.ID })
 		}, func() error {
 			return readMap(ctx, tx, "password_resets", s.Resets, func(x domain.PasswordReset) string { return x.Hash })
+		}, func() error {
+			return readMap(ctx, tx, "email_verifications", s.Verifications, func(x domain.EmailVerification) string { return x.Hash })
 		}}
 	for _, step := range steps {
 		if err := step(); err != nil {
@@ -304,5 +359,156 @@ func save(ctx context.Context, tx *sql.Tx, s *domain.State) error {
 			return err
 		}
 	}
+	for _, v := range s.Verifications {
+		if err := put(ctx, tx, "email_verifications", []string{"token_hash", "user_id"}, []any{v.Hash, v.UserID}, v); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+// purgeOrder deletes an organization's rows child-first. The schema declares
+// no ON DELETE CASCADE, so the order is load-bearing: a parent deleted first
+// is refused by the foreign key. Tables owned through the user (sessions,
+// resets, verifications) are reached by subquery because they carry no
+// organization column.
+var purgeOrder = []string{
+	"DELETE FROM document_files WHERE organization_id=?",
+	"DELETE FROM document_request_items WHERE organization_id=?",
+	"DELETE FROM public_access_tokens WHERE organization_id=?",
+	"DELETE FROM recurring_schedule_runs WHERE schedule_id IN (SELECT id FROM recurring_schedules WHERE organization_id=?)",
+	// The runs table carries its own organization column as well, so a row is
+	// removed whether it is reached through the schedule or through the owner.
+	"DELETE FROM recurring_schedule_runs WHERE organization_id=?",
+	"DELETE FROM document_requests WHERE organization_id=?",
+	"DELETE FROM recurring_schedules WHERE organization_id=?",
+	"DELETE FROM document_template_items WHERE organization_id=?",
+	"DELETE FROM document_templates WHERE organization_id=?",
+	"DELETE FROM clients WHERE organization_id=?",
+	"DELETE FROM notification_deliveries WHERE organization_id=?",
+	"DELETE FROM audit_events WHERE organization_id=?",
+	"DELETE FROM email_verifications WHERE user_id IN (SELECT id FROM users WHERE organization_id=?)",
+	"DELETE FROM password_resets WHERE user_id IN (SELECT id FROM users WHERE organization_id=?)",
+	"DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE organization_id=?)",
+	"DELETE FROM organization_members WHERE organization_id=?",
+	"DELETE FROM users WHERE organization_id=?",
+	"DELETE FROM organizations WHERE id=?",
+}
+
+// PurgeOrganizations removes organizations and everything they own.
+//
+// It exists as its own method because save() only ever upserts: dropping an
+// entity from the in-memory State is invisible to MySQL, and the next load
+// would bring it back. Deletion therefore cannot go through Run — it needs
+// real DELETE statements. Objects in the bucket are the caller's
+// responsibility and must be removed before this returns, since the keys are
+// only reachable through the state this deletes.
+func (s *Store) PurgeOrganizations(ctx context.Context, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.db == nil {
+		next, err := s.clone()
+		if err != nil {
+			return err
+		}
+		for _, id := range ids {
+			purgeState(next, id)
+		}
+		return s.persist(next)
+	}
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	var ok int
+	if err = conn.QueryRowContext(ctx, "SELECT GET_LOCK('docping_write_v1', 15)").Scan(&ok); err != nil || ok != 1 {
+		return errors.New("database writer busy")
+	}
+	defer conn.ExecContext(context.Background(), "SELECT RELEASE_LOCK('docping_write_v1')")
+	tx, err := conn.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead})
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, id := range ids {
+		for _, q := range purgeOrder {
+			if _, err = tx.ExecContext(ctx, q, id); err != nil {
+				return fmt.Errorf("purge %s: %w", id, err)
+			}
+		}
+	}
+	return tx.Commit()
+}
+
+// purgeState is the JSON driver's equivalent of purgeOrder.
+func purgeState(s *domain.State, org string) {
+	users := map[string]bool{}
+	for id, u := range s.Users {
+		if u.OrgID == org {
+			users[id] = true
+			delete(s.Users, id)
+		}
+	}
+	for h, v := range s.Sessions {
+		if users[v.UserID] {
+			delete(s.Sessions, h)
+		}
+	}
+	for h, v := range s.Resets {
+		if users[v.UserID] {
+			delete(s.Resets, h)
+		}
+	}
+	for h, v := range s.Verifications {
+		if users[v.UserID] {
+			delete(s.Verifications, h)
+		}
+	}
+	for id, v := range s.Clients {
+		if v.OrgID == org {
+			delete(s.Clients, id)
+		}
+	}
+	for id, v := range s.Templates {
+		if v.OrgID == org {
+			delete(s.Templates, id)
+		}
+	}
+	schedules := map[string]bool{}
+	for id, v := range s.Schedules {
+		if v.OrgID == org {
+			schedules[id] = true
+			delete(s.Schedules, id)
+		}
+	}
+	for id, v := range s.Runs {
+		if v.OrgID == org || schedules[v.ScheduleID] {
+			delete(s.Runs, id)
+		}
+	}
+	for id, v := range s.Requests {
+		if v.OrgID == org {
+			delete(s.Requests, id)
+		}
+	}
+	for h, v := range s.Tokens {
+		if v.OrgID == org {
+			delete(s.Tokens, h)
+		}
+	}
+	for id, v := range s.Deliveries {
+		if v.OrgID == org {
+			delete(s.Deliveries, id)
+		}
+	}
+	for id, v := range s.Audits {
+		if v.OrgID == org {
+			delete(s.Audits, id)
+		}
+	}
+	delete(s.Organizations, org)
 }

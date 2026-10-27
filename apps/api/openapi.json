@@ -52,7 +52,14 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Session"
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/PendingVerification"
+                    },
+                    {
+                      "$ref": "#/components/schemas/Session"
+                    }
+                  ]
                 }
               }
             }
@@ -99,6 +106,110 @@
               }
             }
           }
+        },
+        "description": "Cria o escritório e envia o link de confirmação. Devolve PendingVerification; a sessão só é aberta em /auth/verify-email. Sem SMTP configurado (apenas desenvolvimento) devolve Session."
+      }
+    },
+    "/auth/verify-email": {
+      "post": {
+        "summary": "Verify e-mail",
+        "description": "Confirma o endereço e abre a sessão. Token de uso único, válido por 24 horas.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "token": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "token"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Sucesso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Session"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "Link de confirmação usado, expirado ou inválido (verification_expired)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Erro padronizado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/resend-verification": {
+      "post": {
+        "summary": "Resend verification",
+        "description": "Reenvia o link de confirmação. Resposta genérica em qualquer caso; intervalo mínimo de 2 minutos.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  }
+                },
+                "required": [
+                  "email"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Sucesso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Message"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Erro padronizado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
         }
       }
     },
@@ -112,6 +223,26 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Session"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Credenciais inválidas (invalid_credentials)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "E-mail ainda não confirmado (email_unverified)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -165,6 +296,26 @@
               }
             }
           },
+          "429": {
+            "description": "Limite por IP excedido (rate_limited), com Retry-After",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Sem vagas de demonstração no momento (demo_unavailable)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "default": {
             "description": "Erro padronizado",
             "content": {
@@ -175,7 +326,8 @@
               }
             }
           }
-        }
+        },
+        "description": "Abre um escritório de demonstração com dados fictícios. Limitado por IP (DEMO_RATE_PER_HOUR) e por total de demonstrações vivas (DEMO_MAX_ACTIVE); cada uma é apagada após DEMO_TTL_HOURS."
       }
     },
     "/auth/logout": {
@@ -524,7 +676,8 @@
           {
             "sessionCookie": []
           }
-        ]
+        ],
+        "description": "Inclui modelos arquivados, cada um com `active`. Ativos primeiro, depois por nome. Somente modelos com `active:true` podem iniciar solicitações ou recorrências."
       },
       "post": {
         "summary": "Criar templates",
@@ -1769,6 +1922,14 @@
                   },
                   "remindersEnabled": {
                     "type": "boolean"
+                  },
+                  "aiReview": {
+                    "type": "string",
+                    "enum": [
+                      "off",
+                      "suggest",
+                      "auto"
+                    ]
                   }
                 },
                 "required": [
@@ -1879,6 +2040,262 @@
           }
         }
       }
+    },
+    "/requests/{requestID}/items/{itemID}/analyze": {
+      "post": {
+        "summary": "Reexecutar a análise automática do documento",
+        "description": "Enfileira novamente a análise do arquivo ativo do item, após falha ou mudança de política. Exige AI_REVIEW_ENABLED no servidor e aiReview diferente de off na organização.",
+        "responses": {
+          "200": {
+            "description": "Sucesso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Request"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Análise desativada, item fora de revisão ou arquivo em quarentena",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Erro padronizado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "requestID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "itemID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/billing/checkout": {
+      "post": {
+        "summary": "Abrir pagamento do plano",
+        "description": "Cria uma sessão de Stripe Checkout (assinatura mensal) e responde com a URL hospedada. Exige sessão e X-CSRF-Token. Nenhum dado de cartão passa por esta API.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "plan": {
+                    "type": "string",
+                    "enum": [
+                      "essencial",
+                      "escritorio",
+                      "rede"
+                    ]
+                  }
+                },
+                "required": [
+                  "plan"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "URL hospedada pela Stripe",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "url": {
+                      "type": "string",
+                      "format": "uri"
+                    }
+                  },
+                  "required": [
+                    "url"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Demonstração não assina (demo_organization) ou assinatura já ativa (already_subscribed)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Plano que esta instalação não vende",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "A Stripe não respondeu (billing_unavailable)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Instalação sem cobrança configurada (billing_disabled)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/billing/portal": {
+      "post": {
+        "summary": "Abrir a área de cobrança",
+        "description": "Cria uma sessão do portal do cliente da Stripe, onde se troca o cartão, muda de plano e cancela. Exige sessão e X-CSRF-Token.",
+        "responses": {
+          "200": {
+            "description": "URL hospedada pela Stripe",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "url": {
+                      "type": "string",
+                      "format": "uri"
+                    }
+                  },
+                  "required": [
+                    "url"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "O escritório nunca assinou (no_subscription)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "A Stripe não respondeu (billing_unavailable)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Instalação sem cobrança configurada (billing_disabled)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/billing/webhook": {
+      "post": {
+        "summary": "Entrada de eventos da Stripe",
+        "description": "Sem sessão, sem CSRF e sem checagem de origem: o que autentica a chamada é o cabeçalho Stripe-Signature, verificado por HMAC-SHA256 sobre 'timestamp.corpo' com tolerância de 5 minutos. Corpo é o evento da Stripe, lido cru. Tipo não tratado responde 200 e é ignorado; 500 só quando a falha é nossa, porque é o que faz a Stripe reentregar.",
+        "parameters": [
+          {
+            "name": "Stripe-Signature",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Evento aceito ou ignorado"
+          },
+          "400": {
+            "description": "Assinatura inválida; sem corpo, por não dar pista a quem sonda"
+          },
+          "404": {
+            "description": "Instalação sem cobrança configurada"
+          },
+          "500": {
+            "description": "Falha nossa ao aplicar; a Stripe reentrega"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1941,6 +2358,31 @@
           },
           "createdAt": {
             "type": "string"
+          },
+          "aiReview": {
+            "type": "string",
+            "enum": [
+              "off",
+              "suggest",
+              "auto"
+            ],
+            "description": "Modo da análise automática desta organização."
+          },
+          "subscriptionStatus": {
+            "type": "string"
+          },
+          "stripeCustomerId": {
+            "type": "string"
+          },
+          "stripeSubscriptionId": {
+            "type": "string"
+          },
+          "currentPeriodEnd": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "cancelAtPeriodEnd": {
+            "type": "boolean"
           }
         }
       },
@@ -1976,6 +2418,9 @@
               "development",
               "production"
             ]
+          },
+          "billing": {
+            "$ref": "#/components/schemas/BillingState"
           }
         },
         "required": [
@@ -2142,7 +2587,9 @@
           },
           "scanStatus": {
             "type": "string",
+            "description": "Uploads are not scanned for malware: novos arquivos nascem \"unscanned\". Os demais valores existem apenas em arquivos gravados antes da remoção do antivírus.",
             "enum": [
+              "unscanned",
               "clean",
               "sample",
               "unscanned_development"
@@ -2153,6 +2600,9 @@
           },
           "sample": {
             "type": "boolean"
+          },
+          "analysis": {
+            "$ref": "#/components/schemas/Analysis"
           }
         }
       },
@@ -2174,6 +2624,13 @@
           },
           "createdAt": {
             "type": "string"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "jev"
+            ],
+            "description": "Presente quando a decisão veio da análise automática; userId fica vazio."
           }
         }
       },
@@ -2579,6 +3036,184 @@
           },
           "sensitive": {
             "type": "boolean"
+          }
+        }
+      },
+      "AnalysisSignal": {
+        "type": "object",
+        "description": "Julgamento individual do Jev, guardado literalmente para que o escritório possa auditar o veredito.",
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "noul",
+              "score",
+              "choice"
+            ]
+          },
+          "answer": {
+            "type": "string",
+            "description": "Opção escolhida, apenas para kind=choice."
+          },
+          "value": {
+            "type": "number",
+            "description": "Probabilidade (noul/choice) ou nota 0..3 (score)."
+          },
+          "confidence": {
+            "type": "number",
+            "description": "Certeza normalizada 0..1; para noul é |2p-1|."
+          }
+        }
+      },
+      "Analysis": {
+        "type": "object",
+        "description": "Análise automática de conformidade do arquivo: extração (Docling/PaddleOCR) e julgamento (Jev). Nunca é exposta no portal do cliente.",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running",
+              "completed",
+              "failed",
+              "disabled"
+            ]
+          },
+          "verdict": {
+            "type": "string",
+            "enum": [
+              "approved",
+              "review",
+              "rejected"
+            ]
+          },
+          "confidence": {
+            "type": "number"
+          },
+          "reason": {
+            "type": "string",
+            "description": "Frase em português; vira o motivo da correção quando reprovado."
+          },
+          "signals": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AnalysisSignal"
+            }
+          },
+          "extractor": {
+            "type": "string",
+            "enum": [
+              "docling",
+              "paddleocr"
+            ]
+          },
+          "model": {
+            "type": "string"
+          },
+          "characters": {
+            "type": "integer"
+          },
+          "applied": {
+            "type": "boolean",
+            "description": "true quando o veredito moveu o item sozinho (organização em modo auto)."
+          },
+          "error": {
+            "type": "string"
+          },
+          "requestedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "completedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "PendingVerification": {
+        "type": "object",
+        "description": "Cadastro criado, aguardando confirmação do e-mail. Nenhuma sessão é aberta.",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "verification_sent"
+            ]
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          }
+        },
+        "required": [
+          "status",
+          "email"
+        ]
+      },
+      "Message": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ]
+      },
+      "BillingState": {
+        "type": "object",
+        "description": "O que o servidor diz que este escritório pode fazer. 'entitled' é o único campo que decide algo; os limites são para a tela mostrar. Com 'enabled' falso a instalação não cobra e 'entitled' é sempre verdadeiro.",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "entitled": {
+            "type": "boolean"
+          },
+          "plan": {
+            "type": "string",
+            "description": "essencial, escritorio, rede, founder_pilot, demo ou vazio"
+          },
+          "status": {
+            "type": "string",
+            "description": "Vocabulário da própria Stripe: active, trialing, past_due, canceled, unpaid, incomplete, paused"
+          },
+          "periodEnd": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "cancelAtPeriodEnd": {
+            "type": "boolean"
+          },
+          "manageable": {
+            "type": "boolean",
+            "description": "Há cliente Stripe gravado, então a área de cobrança abre"
+          },
+          "activeRequests": {
+            "type": "integer"
+          },
+          "limits": {
+            "type": "object",
+            "properties": {
+              "activeRequests": {
+                "type": "integer",
+                "description": "0 significa sem limite próprio do plano"
+              },
+              "storageBytes": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "clients": {
+                "type": "integer"
+              }
+            }
           }
         }
       }

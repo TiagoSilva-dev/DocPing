@@ -1,97 +1,92 @@
 {
   "status": "passed",
-  "completedAt": "2026-10-20T03:12:38.995Z",
-  "elapsedMs": 2332,
+  "completedAt": "2026-10-26T16:42:05.119Z",
+  "elapsedMs": 10294,
   "checks": [
     {
       "name": "local services respond",
       "status": "passed",
-      "elapsedMs": 30
+      "elapsedMs": 26
     },
     {
-      "name": "signup, session cookie and empty real organization",
+      "name": "signup confirmed by e-mail, session cookie and empty real organization",
       "status": "passed",
-      "elapsedMs": 202
+      "elapsedMs": 346
     },
     {
       "name": "client and reusable template persisted",
       "status": "passed",
-      "elapsedMs": 81
+      "elapsedMs": 203
     },
     {
       "name": "CSRF is enforced on authenticated mutations",
       "status": "passed",
-      "elapsedMs": 4
+      "elapsedMs": 6
     },
     {
       "name": "request, snapshot and public link persisted",
       "status": "passed",
-      "elapsedMs": 84
+      "elapsedMs": 200
     },
     {
-      "name": "PDF passes actual ClamAV and private MinIO round trip",
+      "name": "PDF round trips through private MinIO",
       "status": "passed",
-      "elapsedMs": 48
+      "elapsedMs": 111
     },
     {
-      "name": "PNG passes actual ClamAV and independent upload",
+      "name": "PNG uploads independently and round trips",
       "status": "passed",
-      "elapsedMs": 49
+      "elapsedMs": 105
     },
     {
       "name": "unauthenticated file and unsigned MinIO object denied",
       "status": "passed",
-      "elapsedMs": 5
+      "elapsedMs": 7
     },
     {
       "name": "unrelated organization cannot query, mutate or download",
       "status": "passed",
-      "elapsedMs": 212
+      "elapsedMs": 554
     },
     {
       "name": "SMTP accepted by actual Mailpit and message exists",
       "status": "passed",
-      "elapsedMs": 98
-    },
-    {
-      "name": "actual ClamAV rejects harmless EICAR signature",
-      "status": "passed",
-      "elapsedMs": 13
+      "elapsedMs": 202
     },
     {
       "name": "targeted correction preserves unaffected file and history",
       "status": "passed",
-      "elapsedMs": 151
+      "elapsedMs": 302
     },
     {
       "name": "approval completes request and closes additional uploads",
       "status": "passed",
-      "elapsedMs": 55
+      "elapsedMs": 220
     },
     {
       "name": "authorized ZIP contains only current synthetic documents",
       "status": "passed",
-      "elapsedMs": 7
+      "elapsedMs": 8
     },
     {
       "name": "sensitive request requires browser-specific actual email code",
       "status": "passed",
-      "elapsedMs": 208
+      "elapsedMs": 433
     },
     {
       "name": "public token cannot download another requests private file",
       "status": "passed",
-      "elapsedMs": 3
+      "elapsedMs": 5
     },
     {
       "name": "revoked link no longer grants portal or file access",
       "status": "passed",
-      "elapsedMs": 54
+      "elapsedMs": 117
     },
     {
       "name": "actual MySQL8 TestMySQLRoundTrip",
       "status": "passed",
-      "elapsedMs": 1026
+      "elapsedMs": 7447
     }
   ],
   "notExecuted": [

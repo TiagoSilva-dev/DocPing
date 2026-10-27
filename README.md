@@ -2,7 +2,7 @@
 
 Peça uma vez. Acompanhe tudo. Um monólito modular para coletar e conferir documentos de clientes de escritórios contábeis.
 
-**Estado: base funcional do MVP, com fluxo completo implementado. Ainda não homologado para documentos reais ou pilotos pagos.** O frontend compila e os testes de código/API passam. A integração local com Docker, MySQL, MinIO, Mailpit e ClamAV passou. Validação visual/Playwright, infraestrutura de produção e recuperação de backups permanecem pendentes. Não há declaração de conformidade LGPD ou prontidão de produção.
+**Estado: base funcional do MVP, com fluxo completo implementado. Ainda não homologado para documentos reais ou pilotos pagos.** O frontend compila e os testes de código/API passam. A integração local com Docker, MySQL, MinIO e Mailpit passou. **Não há varredura antivírus:** o ClamAV foi removido do produto e da infraestrutura por custo, e o que protege o upload é a verificação de tipo por conteúdo e extensão, o limite de tamanho, o bucket privado e a sessão. Validação visual/Playwright, infraestrutura de produção e recuperação de backups permanecem pendentes. Não há declaração de conformidade LGPD ou prontidão de produção.
 
 ## Executar localmente
 
@@ -17,7 +17,9 @@ Abra **http://localhost:5173**. A API atende em `http://localhost:8080`, acessad
 
 O comando escolhe explicitamente `APP_ENV=development STORE_DRIVER=json`, grava metadados atomicamente em `apps/api/.data/state.json` e mantém arquivos privados em `apps/api/.data/objects/`. O bypass local de antivírus fica identificado como `unscanned_development`. Use apenas arquivos fictícios nesse modo. Produção nunca usa esse fallback e recusa essas configurações.
 
-Na página inicial, **Explorar demonstração** cria um escritório isolado com empresas e PDFs fictícios, identificado na interface. Não existe login demonstrativo automático, senha compartilhada nem envio externo de e-mail na demonstração. **Criar meu escritório** inicia uma organização vazia com três modelos prontos e conduz à primeira solicitação. Não pede cartão nem simula pagamentos.
+Na página inicial, **Explorar demonstração** cria um escritório isolado com empresas e PDFs fictícios, identificado na interface. Não existe login demonstrativo automático, senha compartilhada nem envio externo de e-mail na demonstração. **Criar meu escritório** inicia uma organização vazia com três modelos prontos e conduz à primeira solicitação. Não pede cartão nem simula pagamentos, e **não oferece teste gratuito**.
+
+O cadastro não abre sessão direto: envia um link de confirmação para o e-mail informado e o espaço só fica acessível depois que ele é usado. Em desenvolvimento sem SMTP configurado — a única situação em que isso é possível, já que produção recusa iniciar sem SMTP — a conta nasce confirmada e você entra na hora. As demonstrações e os cadastros nunca confirmados são apagados por completo depois do prazo (`DEMO_TTL_HOURS`, `UNVERIFIED_TTL_HOURS`), e a demonstração tem teto de vagas simultâneas e orçamento por IP por hora: cada uma cria uma organização real, sem e-mail nem senha.
 
 O Vite recarrega o frontend automaticamente. Reinicie `npm run dev` após alterar Go. `Ctrl+C` encerra os processos do comando.
 
@@ -34,7 +36,7 @@ npm run dev:web
 
 O comando de cópia preserva um `.env` existente. Nesta sessão ele já foi criado com valores aleatórios locais. Não troque senhas de um banco persistido sem atualizar também as credenciais no MySQL.
 
-Serviços: API `8080` (ou `API_HOST_PORT`), MySQL `3306`, MinIO `9000`/console `9001`, Mailpit `8025` e ClamAV na rede interna. As portas publicadas ficam em loopback. A API executa a migração versionada na inicialização; se o scanner ainda estiver atualizando, o upload falha com mensagem e pode ser repetido. Não libera arquivos sem verificação nesse modo.
+Serviços: API `8080` (ou `API_HOST_PORT`), MySQL `3306`, MinIO `9000`/console `9001` e Mailpit `8025`. As portas publicadas ficam em loopback. A API executa a migração versionada na inicialização.
 
 Para executar também o frontend em container:
 
@@ -48,14 +50,16 @@ Nesse caso, não execute o Vite na mesma porta. Nesta máquina, o `.env` local u
 
 - Landing curta, login, criação do escritório, recuperação/redefinição de senha e onboarding dentro da primeira solicitação.
 - Central operacional, filtros por estado/competência, busca por cliente/CNPJ, progresso derivado dos documentos e prioridades de revisão/atraso.
-- Clientes com criação, edição, arquivamento, histórico e importação CSV com prévia, validação por linha e gravação atômica.
+- Clientes com criação, edição, arquivamento, histórico e importação CSV com prévia, validação por linha e gravação atômica. Cliente recém-cadastrado abre o convite de cobrança: o escritório decide ali se já monta a primeira solicitação e envia o link por e-mail e WhatsApp.
 - Modelos editáveis, ordenação de itens e cópia dos requisitos preservada em cada solicitação.
 - Criação individual ou em lote em três etapas; links temporários revogáveis; WhatsApp manual; tentativa SMTP com estado verdadeiro.
 - Portal sem cadastro, upload independente com progresso real, retry, deduplicação por conteúdo, foto/arquivo, retomada dos envios já salvos e código adicional para solicitações sensíveis.
 - Prévia privada de PDF/JPG/PNG, histórico de versões, aprovação, correção com motivo por arquivo e conclusão validada no servidor. HEIC permite envio/download; conversão de prévia fica pendente.
 - Recorrências mensais idempotentes no fuso de São Paulo, último dia para meses curtos, snapshots, pausar/reativar e histórico de execução.
 - Lembretes configuráveis, registro de tentativas e falhas de comunicação visíveis no painel; exportação ZIP autorizada.
-- Argon2id, sessões HttpOnly/SameSite/Secure em produção, CSRF, isolamento por escritório, tokens de alta entropia com hash, expiração, auditoria, limites e scanner que falha fechado.
+- Análise automática opcional de cada arquivo: Docling extrai o texto (PaddleOCR cobre foto e digitalização sem camada de texto) e o modelo Jev julga seis critérios; o veredito é composto em código e pode aprovar, devolver com motivo ou escalar para revisão humana. Desligada por padrão e configurável por escritório.
+- Páginas públicas de [Política de Privacidade](https://docping.com.br/privacidade) e [Termos de Uso](https://docping.com.br/termos), rodapé com contato e aviso de cookies que não carrega nenhuma ferramenta de medição antes do aceite. Detalhes em [docs/08-seo.md](docs/08-seo.md).
+- Argon2id, sessões HttpOnly/SameSite/Secure em produção, CSRF, isolamento por escritório, tokens de alta entropia com hash, expiração, auditoria e limites. Não há varredura antivírus: o que barra um upload é o tipo conferido por conteúdo e extensão, o limite de tamanho, o bucket privado e a sessão.
 
 Preço e limite do plano não ficam em componentes. A cobrança do piloto é externa; não existe checkout simulado. A política de retenção pode ser registrada, mas não há rotina de eliminação automática pronta: isso está explicitado na interface e nos gates de lançamento.
 
@@ -63,7 +67,7 @@ Preço e limite do plano não ficam em componentes. A cobrança do piloto é ext
 
 ```text
 apps/web       React + TypeScript + Vite + EasyUI + Tailwind
-apps/api       Go, API REST, jobs, persistência e migrações
+apps/api       Go, API REST, jobs, análise de documentos, persistência e migrações
 infra          Containers e operação local
 docs           Produto, arquitetura, experiência, aceite e segurança
 scripts        Execução conjunta de desenvolvimento
@@ -80,6 +84,7 @@ TanStack Query controla os dados remotos; React Hook Form e Zod validam autentic
 5. [Segurança e condições para o piloto](docs/05-seguranca-e-piloto.md).
 6. [Contrato efetivamente implementado](docs/api-contract.md) e [OpenAPI 3.1](apps/api/openapi.json).
 7. [Validações executadas e pendências](docs/06-validacao-da-entrega.md).
+8. [SEO e presença pública](docs/08-seo.md): o que é indexável, o domínio canônico e as pendências.
 
 Metas de 60 segundos para criar uma solicitação e até duas ações para aprovação são **metas de projeto**. Não foram medidas com usuários reais. Links/recorrência/revisão não são apresentados como diferenciais exclusivos.
 
@@ -95,7 +100,9 @@ go test -race ./...
 go vet ./...
 ```
 
-Os testes Go usam HTTP real de teste, arquivos sintéticos, fixture SMTP e fixture do protocolo ClamAV. Cobrem autenticação, CSRF, segregação, uploads, correção/reenvio, fechamento, limites, concorrência, expiração/revogação, CSV, recorrência e lembretes. Não substituem a homologação com os serviços de produção.
+Os testes Go usam HTTP real de teste, arquivos sintéticos e fixture SMTP. Cobrem autenticação, CSRF, segregação, uploads, correção/reenvio, fechamento, limites, concorrência, expiração/revogação, CSV, recorrência e lembretes. Não substituem a homologação com os serviços de produção.
+
+A análise automática tem testes de unidade da composição do veredito, dos clientes HTTP (Docling, PaddleOCR e TypeSafe em servidores de teste) e do worker que aplica ou não o resultado. **Os serviços reais — docling-serve, PaddleOCR e a API da TypeSafe — não foram executados nesta entrega:** não há medição de acurácia, latência, custo por documento nem calibração dos limiares em documentos reais. Antes de ligar o modo automático em um escritório, isso precisa ser feito.
 
 Teste MySQL opt-in, somente contra banco descartável e isolado:
 
@@ -108,12 +115,12 @@ MYSQL_TEST_DSN='<dsn-do-banco-de-teste>' go test ./internal/persistence -run MyS
 +Com os containers saudáveis:
 +
 +```sh
-+node scripts/integration-smoke.mjs --mysql --eicar
++node scripts/integration-smoke.mjs --mysql
 +```
 +
-+Foram executados e passaram **18 cenários** contra MySQL, MinIO, ClamAV e Mailpit reais: upload de PDF/PNG verificado, arquivos privados, SMTP, isolamento, correção por arquivo, reenvio, conclusão, ZIP, OTP por navegador, revogação e rejeição de uma fixture EICAR incorporada em PDF, sem persistir o arquivo. O teste direto MySQL também passou, sem skip. O script lê o `.env` sem imprimir segredos e aceita somente endpoints locais. Relatório sanitizado em `test-results/integration-smoke.json`.
++Foram executados e passaram **18 cenários** contra MySQL, MinIO, ClamAV e Mailpit reais: upload de PDF/PNG, arquivos privados, SMTP, isolamento, correção por arquivo, reenvio, conclusão, ZIP, OTP por navegador, revogação e, à época, a rejeição de uma fixture EICAR incorporada em PDF. O teste direto MySQL também passou, sem skip. O script lê o `.env` sem imprimir segredos e aceita somente endpoints locais. Relatório sanitizado em `test-results/integration-smoke.json`.
 +
-+A fixture EICAR usa um arquivo incorporado em PDF válido; a primeira tentativa com assinatura apenas anexada após o EOF não era adequada e foi corrigida antes da rodada aprovada. Esse teste de assinatura não prova detecção de todas as ameaças.
++Depois da remoção do ClamAV o script ficou com **17 cenários** — os dois do scanner e a opção `--eicar` saíram — e foi **reexecutado em 26/10/2026 contra MySQL 8, MinIO e Mailpit reais: 17/17 passaram em 10 segundos**, incluindo `TestMySQLRoundTrip` sem skip. Os arquivos enviados nessa rodada ficaram gravados como `unscanned`, confirmado no banco. O mesmo run exigiu ensinar ao script o cadastro com confirmação de e-mail, que ele não conhecia desde que essa etapa entrou na API.
 +
 +### Interface ponta a ponta
 

@@ -69,8 +69,8 @@ export const AnimatedTabs: React.FC<AnimatedTabsProps> = ({
         className={cn(
           "flex items-center gap-1 self-start select-none",
           isGlass
-            ? "p-1 rounded-full bg-surface-raised backdrop-blur-xl border border-border dark:bg-[#0E0E0E] dark:border-[#1F1F1F]"
-            : "p-1 rounded-lg bg-surface-raised border border-border dark:bg-[#0E0E0E] dark:border-[#1F1F1F]",
+            ? "p-1 rounded-full bg-surface-raised backdrop-blur-xl border border-border dark:bg-[#0a0a0a] dark:border-[#181818]"
+            : "p-1 rounded-lg bg-surface-raised border border-border dark:bg-[#0a0a0a] dark:border-[#181818]",
           tabsContainerClassName,
         )}
       >
@@ -110,8 +110,8 @@ export const AnimatedTabs: React.FC<AnimatedTabsProps> = ({
                   ? "px-4 py-1.5 rounded-full"
                   : "px-3.5 py-1.5 rounded-md",
                 isActive
-                  ? "text-text-primary font-medium dark:text-[#FAFAFA]"
-                  : "text-text-muted hover:text-text-secondary dark:text-[#6B6B6B] dark:hover:text-[#A1A1A1]",
+                  ? "text-text-primary font-medium dark:text-[#fafafa]"
+                  : "text-text-muted hover:text-text-secondary dark:text-[#606060] dark:hover:text-[#a6a6a6]",
               )}
             >
               {isActive && (
@@ -120,8 +120,8 @@ export const AnimatedTabs: React.FC<AnimatedTabsProps> = ({
                   className={cn(
                     "absolute inset-0 shadow-xs",
                     isGlass
-                      ? "rounded-full bg-surface border border-border-hover dark:bg-[#141414] dark:border-[#1F1F1F]"
-                      : "rounded-md bg-surface border border-border-hover dark:bg-[#141414] dark:border-[#1F1F1F]",
+                      ? "rounded-full bg-surface border border-border-hover dark:bg-[#0f0f0f] dark:border-[#181818]"
+                      : "rounded-md bg-surface border border-border-hover dark:bg-[#0f0f0f] dark:border-[#181818]",
                   )}
                   transition={motionTransitions.springMorph}
                 />
@@ -130,7 +130,7 @@ export const AnimatedTabs: React.FC<AnimatedTabsProps> = ({
                 {tab.icon && <span>{tab.icon}</span>}
                 {tab.label}
                 {tab.badge && (
-                  <span className="px-1.5 py-0.5 text-[10px] font-mono rounded bg-surface-hover border border-border text-text-secondary dark:bg-[#141414] dark:border-[#1F1F1F] dark:text-[#A1A1A1]">
+                  <span className="px-1.5 py-0.5 text-[10px] font-mono rounded bg-surface-hover border border-border text-text-secondary dark:bg-[#0f0f0f] dark:border-[#181818] dark:text-[#a6a6a6]">
                     {tab.badge}
                   </span>
                 )}
@@ -150,7 +150,7 @@ export const AnimatedTabs: React.FC<AnimatedTabsProps> = ({
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -6 }}
                 transition={motionTransitions.springGentle}
-                className="text-sm text-text-secondary dark:text-[#A1A1A1]"
+                className="text-sm text-text-secondary dark:text-[#a6a6a6]"
               >
                 {currentTabObj.content}
               </motion.div>

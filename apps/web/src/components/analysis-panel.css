@@ -1,0 +1,249 @@
+/* The analysis panel is the one place in the neutral interface that carries
+   colour, and only through the semantic signal tokens: the office has to read
+   approved / review / rejected without stopping to parse text. */
+.analysis-panel {
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: #fcfcfc;
+  margin: 0 22px 18px;
+  overflow: hidden;
+}
+.analysis-panel.pending,
+.analysis-panel.failed {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 14px 16px;
+}
+.analysis-panel.pending > svg,
+.analysis-panel.failed > svg {
+  margin-top: 1px;
+  color: #6b6b6b;
+}
+.analysis-panel.failed {
+  border-color: var(--danger-border);
+  background: var(--danger-soft);
+}
+.analysis-panel.failed > svg {
+  color: var(--danger);
+}
+.analysis-panel.pending strong,
+.analysis-panel.failed strong {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+}
+.analysis-panel.pending p,
+.analysis-panel.failed p {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.6;
+  margin-top: 4px;
+}
+.analysis-panel.failed > button,
+.analysis-foot > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 10px;
+  font-weight: 550;
+  color: var(--text-primary);
+}
+.analysis-panel.failed > button:hover:not(:disabled),
+.analysis-foot > button:hover:not(:disabled) {
+  background: #f5f5f5;
+}
+.analysis-panel.failed > button:disabled,
+.analysis-foot > button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.analysis-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 15px 16px 14px;
+}
+.analysis-head > div {
+  flex: 1;
+  min-width: 0;
+}
+.analysis-head strong {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.analysis-head strong > em {
+  font-style: normal;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-border);
+  border-radius: 4px;
+  padding: 2px 5px;
+}
+.analysis-head p {
+  font-size: 11px;
+  line-height: 1.65;
+  color: #525252;
+  margin-top: 5px;
+}
+.analysis-mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  flex-shrink: 0;
+}
+.analysis-confidence {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+  font-weight: 500;
+  flex-shrink: 0;
+  padding: 3px 7px;
+  border-radius: 5px;
+  background: #f2f2f2;
+  color: #4a4a4a;
+}
+.analysis-panel.approved {
+  border-left: 3px solid var(--ok);
+  border-color: var(--ok-border);
+  background: #fbfdfb;
+}
+.analysis-panel.approved .analysis-mark {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+.analysis-panel.review {
+  border-left: 3px solid var(--warn);
+  border-color: var(--warn-border);
+  background: #fefcf8;
+}
+.analysis-panel.review .analysis-mark {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+.analysis-panel.rejected {
+  border-left: 3px solid var(--danger);
+  border-color: var(--danger-border);
+  background: #fefafa;
+}
+.analysis-panel.rejected .analysis-mark {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+.analysis-signals {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  margin: 0;
+  background: var(--border);
+  border-top: 1px solid var(--border);
+}
+.analysis-signals > div {
+  background: #ffffff;
+  padding: 10px 13px 11px;
+  min-width: 0;
+}
+.analysis-signals dt {
+  font-size: 10px;
+  color: #6b6b6b;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.analysis-signals dd {
+  margin: 6px 0 0;
+}
+.analysis-signals dd > span {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: capitalize;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The bar is the model's certainty for that single signal, so a verdict the
+   office disagrees with can be traced to the judgement that caused it. */
+.analysis-signals dd > i {
+  display: block;
+  height: 2px;
+  min-width: 2px;
+  border-radius: 2px;
+  background: #141414;
+  margin-top: 6px;
+}
+.analysis-foot {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border-top: 1px solid var(--border);
+  padding: 9px 13px;
+  font-size: 10px;
+  color: #6b6b6b;
+  background: #fafafa;
+}
+.analysis-foot > svg {
+  color: #8a8a8a;
+}
+.analysis-foot > span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 900px) {
+  .analysis-signals {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 700px) {
+  .analysis-panel {
+    margin: 0 18px 15px;
+  }
+  .analysis-signals {
+    grid-template-columns: 1fr 1fr;
+  }
+  .analysis-head {
+    padding: 13px;
+  }
+}
+
+/* Tone of each signal: the colour answers "is this one good?", the bar answers
+   "how sure is the model?". The number is always written out too. */
+.analysis-signals > div > dd > i {
+  background: #9a9a9a;
+}
+.analysis-signals > div.ok > dd > i {
+  background: var(--ok);
+}
+.analysis-signals > div.bad > dd > i {
+  background: var(--danger);
+}
+.analysis-signals > div.ok > dd > span {
+  color: var(--ok);
+}
+.analysis-signals > div.bad > dd > span {
+  color: var(--danger);
+}
+.analysis-signals > div > dd > small {
+  display: block;
+  color: #8a8a8a;
+  font-size: 9.5px;
+  margin-top: 5px;
+}

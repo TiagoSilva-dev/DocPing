@@ -7,6 +7,38 @@ export type RequestStatus =
   | "correction_required"
   | "completed"
   | "cancelled";
+export type AIReviewMode = "off" | "suggest" | "auto";
+export type AnalysisStatus =
+  | "queued"
+  | "running"
+  | "completed"
+  | "failed"
+  | "disabled";
+export type AnalysisVerdict = "approved" | "review" | "rejected";
+export interface AnalysisSignal {
+  key: string;
+  label: string;
+  kind: "noul" | "score" | "choice";
+  answer?: string;
+  value: number;
+  confidence: number;
+}
+/** Automated conformity check of one file: Docling/PaddleOCR extract the text,
+ *  Jev judges it, and the server composes the verdict. */
+export interface Analysis {
+  status: AnalysisStatus;
+  verdict?: AnalysisVerdict;
+  confidence: number;
+  reason?: string;
+  signals?: AnalysisSignal[];
+  extractor?: string;
+  model?: string;
+  characters?: number;
+  applied: boolean;
+  error?: string;
+  requestedAt?: string;
+  completedAt?: string;
+}
 export interface Organization {
   id: string;
   name: string;
@@ -17,12 +49,29 @@ export interface Organization {
   remindersEnabled?: boolean;
   reminderDays?: number[];
   retentionDays?: number;
+  aiReview?: AIReviewMode;
+}
+// BillingState is what the server says this workspace may do. `entitled` is
+// the only field that decides anything: the limits are shown, never enforced,
+// here -- the API refuses what the plan does not allow, whatever the screen
+// believes.
+export interface BillingState {
+  enabled: boolean;
+  entitled: boolean;
+  plan: string;
+  status: string;
+  periodEnd?: string;
+  cancelAtPeriodEnd?: boolean;
+  manageable: boolean;
+  activeRequests: number;
+  limits: { activeRequests: number; storageBytes: number; clients: number };
 }
 export interface Session {
   environment?: string;
   user: { id: string; name: string; email: string };
   organization: Organization;
   csrfToken: string;
+  billing?: BillingState;
 }
 export interface Client {
   id: string;
@@ -46,6 +95,7 @@ export interface Template {
   name: string;
   description: string;
   items: TemplateItem[];
+  active: boolean;
 }
 export interface DocumentFile {
   id: string;
@@ -56,6 +106,7 @@ export interface DocumentFile {
   scanStatus: string;
   superseded?: boolean;
   sample?: boolean;
+  analysis?: Analysis;
 }
 export interface RequestItem extends TemplateItem {
   status: ItemStatus;
@@ -65,6 +116,7 @@ export interface RequestItem extends TemplateItem {
   reviews?: {
     action: string;
     reason?: string;
+    source?: string;
     userId: string;
     createdAt: string;
   }[];

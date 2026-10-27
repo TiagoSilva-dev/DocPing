@@ -4,7 +4,10 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"docping/api/internal/analysis"
+	"docping/api/internal/billing"
 	"docping/api/internal/domain"
+	"docping/api/internal/mailer"
 	"docping/api/internal/persistence"
 	"docping/api/internal/storage"
 	"encoding/hex"
@@ -12,7 +15,6 @@ import (
 	"errors"
 	"io"
 	"log"
-	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -24,6 +26,17 @@ type App struct {
 	Store   *persistence.Store
 	Objects *storage.Objects
 	limiter limiter
+	// Analyzer and analysisJobs are nil unless AI_REVIEW_ENABLED is set, so
+	// an unconfigured deployment behaves exactly as it did before.
+	Analyzer     *analysis.Analyzer
+	analysisJobs chan analysisJob
+	// Mail is nil unless RESEND_API_KEY is set, and then it is the transport
+	// sendEmail uses instead of SMTP.
+	Mail *mailer.Resend
+	// Stripe is nil unless STRIPE_SECRET_KEY is set. Every billing route
+	// checks Config.Billing() before touching it, so a deployment without a
+	// key never reaches a nil client.
+	Stripe *billing.Client
 }
 type APIError struct {
 	Status        int
@@ -56,6 +69,8 @@ func (a *App) routes() http.Handler {
 	a.handle(m, "POST /api/auth/logout", true, true, a.logout)
 	a.handle(m, "POST /api/auth/forgot-password", true, false, a.forgotPassword)
 	a.handle(m, "POST /api/auth/reset-password", true, false, a.resetPassword)
+	a.handle(m, "POST /api/auth/verify-email", true, false, a.verifyEmail)
+	a.handle(m, "POST /api/auth/resend-verification", true, false, a.resendVerification)
 	a.handle(m, "GET /api/clients", false, true, a.clients)
 	a.handle(m, "GET /api/clients/{id}", false, true, a.client)
 	a.handle(m, "POST /api/clients", true, true, a.createClient)
@@ -73,6 +88,7 @@ func (a *App) routes() http.Handler {
 	a.handle(m, "POST /api/requests/{id}/notify", true, true, a.notify)
 	a.handle(m, "POST /api/requests/{id}/cancel", true, true, a.cancel)
 	a.handle(m, "POST /api/requests/{requestID}/items/{itemID}/review", true, true, a.review)
+	a.handle(m, "POST /api/requests/{requestID}/items/{itemID}/analyze", true, true, a.analyze)
 	a.handle(m, "GET /api/portal/{token}", false, false, a.portal)
 	a.handle(m, "POST /api/portal/{token}/code", true, false, a.portalCode)
 	a.handle(m, "POST /api/portal/{token}/verify", true, false, a.portalVerify)
@@ -85,6 +101,12 @@ func (a *App) routes() http.Handler {
 	a.handle(m, "PUT /api/organization", true, true, a.updateOrganization)
 	a.handle(m, "GET /api/notifications", false, true, a.notifications)
 	a.handle(m, "GET /api/audit", false, true, a.audits)
+	// Billing bypasses a.handle for the same reasons upload and export do:
+	// each one talks to Stripe, and an HTTP call to another company must not
+	// hold a database transaction open. The webhook has no session at all.
+	m.HandleFunc("POST /api/billing/checkout", a.checkoutHTTP)
+	m.HandleFunc("POST /api/billing/portal", a.portalHTTP)
+	m.HandleFunc("POST /api/billing/webhook", a.webhookHTTP)
 	m.HandleFunc("GET /api/files/{id}", a.file)
 	m.HandleFunc("GET /api/requests/{id}/export", a.export)
 	m.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, map[string]string{"status": "ok"}) })
@@ -94,6 +116,19 @@ func (a *App) routes() http.Handler {
 	return a.security(m)
 }
 func (a *App) Handler() http.Handler { return a.routes() }
+
+// originError keeps the production message opaque while development names the
+// expected origin, which is the single most common cause of a blank screen on
+// a freshly configured machine.
+func (a *App) originError(origin string) error {
+	if a.Config.Env == "production" {
+		return fail(403, "origin_rejected", "Origem não permitida.")
+	}
+	if origin == "" {
+		return fail(403, "origin_rejected", "Origem não permitida. Abra o aplicativo em "+a.Config.Origin+" (requisição sem cabeçalho Origin e marcada como cross-site).")
+	}
+	return fail(403, "origin_rejected", "Origem não permitida: "+origin+". Abra o aplicativo em "+strings.Join(a.Config.AllowedOriginList(), " ou ")+", ou ajuste WEB_ORIGIN/WEB_ORIGINS.")
+}
 func (a *App) security(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -104,19 +139,29 @@ func (a *App) security(next http.Handler) http.Handler {
 		if a.Config.Env == "production" {
 			w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 		}
+		w.Header().Set("Vary", "Origin")
 		origin := r.Header.Get("Origin")
-		if origin != "" && origin != a.Config.Origin {
-			writeError(w, fail(403, "origin_rejected", "Origem não permitida."))
+		allowed := origin != "" && a.Config.AllowedOrigin(origin)
+		if origin != "" && !allowed {
+			// Logged with the rejected value because a mismatch between the
+			// browser address and WEB_ORIGIN is otherwise invisible from the
+			// response alone.
+			log.Printf("origin rejected: %q is not in the allowed set %v", origin, a.Config.AllowedOriginList())
+			writeError(w, a.originError(origin))
 			return
 		}
-		if r.Header.Get("Sec-Fetch-Site") == "cross-site" {
-			writeError(w, fail(403, "origin_rejected", "Origem não permitida."))
+		// An allowed Origin is this product's own app even when the browser
+		// labels it cross-site, which happens whenever the SPA and the API are
+		// served from different ports or hostnames. Writes still require the
+		// CSRF token, so the check only has to stop unidentified cross-site
+		// traffic.
+		if !allowed && r.Header.Get("Sec-Fetch-Site") == "cross-site" {
+			writeError(w, a.originError(origin))
 			return
 		}
-		if origin == a.Config.Origin {
+		if allowed {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
-			w.Header().Set("Vary", "Origin")
 		}
 		if r.Method == "OPTIONS" {
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-CSRF-Token")
@@ -124,9 +169,21 @@ func (a *App) security(next http.Handler) http.Handler {
 			w.WriteHeader(204)
 			return
 		}
-		group, max := "api", 600
+		group, max, window := "api", 600, time.Minute
 		if strings.Contains(r.URL.Path, "/auth/") {
 			group, max = "auth", 20
+		}
+		// Creating a demonstration costs an organization with a dozen sample
+		// clients and requests, so it is budgeted per hour rather than per
+		// minute: a prospect needs one, not twenty.
+		if r.URL.Path == "/api/auth/demo" {
+			group, max, window = "demo", a.Config.DemoRateHourly, time.Hour
+		}
+		// Each checkout opens a session on Stripe's side; a browser has no
+		// reason to ask for dozens a minute, and the webhook is excluded
+		// because throttling Stripe only turns a delivery into a retry.
+		if r.URL.Path == "/api/billing/checkout" || r.URL.Path == "/api/billing/portal" {
+			group, max = "billing", 10
 		}
 		if strings.Contains(r.URL.Path, "/portal/") {
 			group, max = "portal", 120
@@ -134,8 +191,13 @@ func (a *App) security(next http.Handler) http.Handler {
 				group, max = "upload", 20
 			}
 		}
-		ip, _, _ := net.SplitHostPort(r.RemoteAddr)
-		if !a.limiter.Allow(group+":"+ip, max, time.Minute) {
+		ip := a.Config.ClientIP(r.RemoteAddr, r.Header.Get("X-Forwarded-For"))
+		if !a.limiter.Allow(group+":"+ip, max, window) {
+			if group == "demo" {
+				w.Header().Set("Retry-After", "3600")
+				writeError(w, fail(429, "rate_limited", "Você já abriu demonstrações demais deste dispositivo. Tente novamente em uma hora."))
+				return
+			}
 			w.Header().Set("Retry-After", "60")
 			writeError(w, fail(429, "rate_limited", "Muitas tentativas. Aguarde um minuto."))
 			return
@@ -211,7 +273,29 @@ func (c *call) authenticate(write bool) error {
 	c.User = u
 	c.Session = s
 	c.Org = o
+	// The subscription gate. It sits here rather than in a.handle so that it
+	// covers every authenticated route at once, including the three that
+	// stream outside the transaction pipeline. A deployment without Stripe
+	// configured has no gate at all.
+	if c.A.Config.Billing() && !o.Entitled() && !billingExempt(c.R.URL.Path, write) {
+		return fail(402, "subscription_required", "Assine um plano para usar o DocPing.")
+	}
 	return nil
+}
+
+// billingExempt lists what an unsubscribed workspace may still reach: the
+// session it is signed into, the organization record the subscribe screen
+// reads, the way out, and billing itself. Everything else waits for a plan.
+func billingExempt(path string, write bool) bool {
+	switch path {
+	case "/api/auth/logout", "/api/billing/checkout", "/api/billing/portal":
+		return true
+	case "/api/session", "/api/organization":
+		// Readable, so the subscribe screen can say whose workspace this is
+		// and which plan lapsed. Editing the organization waits for a plan.
+		return !write
+	}
+	return false
 }
 func rEqual(a, b string) bool {
 	if len(a) != len(b) || len(a) == 0 {
@@ -261,12 +345,14 @@ func (a *App) StartWorker(ctx context.Context) {
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
 	a.tick(ctx, time.Now())
+	a.cleanup(ctx, time.Now())
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case now := <-ticker.C:
 			a.tick(ctx, now)
+			a.cleanup(ctx, now)
 		}
 	}
 }

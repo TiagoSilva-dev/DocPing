@@ -6,59 +6,133 @@ import (
 	"docping/api/internal/domain"
 	"errors"
 	"fmt"
+	"log"
+	"mime"
+	"mime/quotedprintable"
 	"net"
 	"net/smtp"
 	"strings"
 	"time"
 )
 
+// messageIDDomain takes the sender's domain so the Message-ID a provider sees
+// belongs to the sending domain. Subjects carry accents and an em dash, so the
+// header has to be RFC 2047 encoded instead of written as raw UTF-8 bytes,
+// which some providers reject and others deliver as mojibake.
+func messageIDDomain(from string) string {
+	if n := strings.LastIndex(from, "@"); n >= 0 && n+1 < len(from) {
+		return from[n+1:]
+	}
+	return "docping.invalid"
+}
+
+// smtpTLSConfig verifies the provider's certificate against the system roots
+// and the configured hostname. A test may supply its own pool; nothing else
+// ever does, and verification is never skipped.
+func (a *App) smtpTLSConfig() *tls.Config {
+	return &tls.Config{ServerName: a.Config.SMTPHost, MinVersion: tls.VersionTLS12, RootCAs: a.Config.smtpRoots}
+}
+
+// smtpFailure keeps the two audiences apart. The customer and the delivery
+// record get the short Portuguese sentence they can act on; the server log
+// gets the provider's actual complaint, which is the only thing that tells a
+// blocked port apart from a rejected certificate or a refused sender. Saying
+// only the friendly sentence turned a platform that silently blocks outbound
+// SMTP into a mystery, so the real cause is written down now.
+//
+// The underlying error never carries the password: it is the transport's own
+// message, or the server's reply to a command.
+func (a *App) smtpFailure(stage, friendly string, err error) error {
+	log.Printf("smtp %s failed (%s, mode %s): %v", stage, net.JoinHostPort(a.Config.SMTPHost, a.Config.SMTPPort), a.Config.SMTPTLSMode, err)
+	return errors.New(friendly)
+}
+
+// sendEmail delivers one message by whichever transport this deployment has.
+// HTTPS wins when it is configured: it is the one that works everywhere,
+// including on a platform that blocks the SMTP port outright. SMTP stays for
+// the local stack, where Mailpit is the whole point.
+// sendEmail delivers a text-only message. Notices that are a sentence and
+// nothing else still use it.
 func (a *App) sendEmail(to, subject, body string) error {
-	if a.Config.SMTPHost == "" || a.Config.SMTPFrom == "" {
+	return a.sendEmailHTML(to, subject, body, "")
+}
+
+// sendEmailHTML delivers a message with both parts. The text is never
+// optional: a message with no text alternative reads as suspect to a filter,
+// and some people read everything as text on purpose.
+func (a *App) sendEmailHTML(to, subject, body, htmlBody string) error {
+	if !a.Config.CanSendEmail() {
 		return errors.New("e-mail não configurado")
 	}
-	if !validEmail(to) || !validEmail(a.Config.SMTPFrom) || strings.ContainsAny(subject, "\r\n") {
+	if !validEmail(to) || !validEmail(a.Config.Sender()) || strings.ContainsAny(subject, "\r\n") {
 		return errors.New("destinatário inválido")
 	}
+	if a.Mail != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := a.Mail.Send(ctx, a.Config.Sender(), to, subject, body, htmlBody); err != nil {
+			// The provider's own words go to the log; the customer and the
+			// delivery record get the sentence they can act on.
+			log.Printf("resend send failed (from %s): %v", a.Config.Sender(), err)
+			return errors.New("provedor de e-mail recusou a mensagem")
+		}
+		return nil
+	}
+	return a.sendSMTP(to, subject, body, htmlBody)
+}
+
+func (a *App) sendSMTP(to, subject, body, htmlBody string) error {
 	addr := net.JoinHostPort(a.Config.SMTPHost, a.Config.SMTPPort)
-	conn, err := net.DialTimeout("tcp", addr, 10*time.Second)
-	if err != nil {
-		return errors.New("provedor de e-mail indisponível")
+	implicit := a.Config.SMTPTLSMode == smtpTLSImplicit
+	var conn net.Conn
+	var err error
+	if implicit {
+		// The port answers in TLS, so the handshake comes before the SMTP
+		// greeting. There is no plaintext phase to fall back to.
+		conn, err = tls.DialWithDialer(&net.Dialer{Timeout: 10 * time.Second}, "tcp", addr, a.smtpTLSConfig())
+		if err != nil {
+			return a.smtpFailure("implicit TLS dial", "falha na conexão TLS de e-mail", err)
+		}
+	} else if conn, err = net.DialTimeout("tcp", addr, 10*time.Second); err != nil {
+		return a.smtpFailure("dial", "provedor de e-mail indisponível", err)
 	}
 	defer conn.Close()
 	_ = conn.SetDeadline(time.Now().Add(20 * time.Second))
 	client, err := smtp.NewClient(conn, a.Config.SMTPHost)
 	if err != nil {
-		return errors.New("provedor de e-mail indisponível")
+		return a.smtpFailure("greeting", "provedor de e-mail indisponível", err)
 	}
 	defer client.Close()
-	if ok, _ := client.Extension("STARTTLS"); ok {
-		if err = client.StartTLS(&tls.Config{ServerName: a.Config.SMTPHost, MinVersion: tls.VersionTLS12}); err != nil {
-			return errors.New("falha na conexão TLS de e-mail")
+	if !implicit {
+		if ok, _ := client.Extension("STARTTLS"); ok {
+			if err = client.StartTLS(a.smtpTLSConfig()); err != nil {
+				return a.smtpFailure("starttls", "falha na conexão TLS de e-mail", err)
+			}
+		} else if a.Config.SMTPRequireTLS {
+			return errors.New("o provedor precisa oferecer TLS")
 		}
-	} else if a.Config.SMTPRequireTLS {
-		return errors.New("o provedor precisa oferecer TLS")
 	}
 	if a.Config.SMTPUser != "" {
 		if err = client.Auth(smtp.PlainAuth("", a.Config.SMTPUser, a.Config.SMTPPass, a.Config.SMTPHost)); err != nil {
-			return errors.New("autenticação do provedor de e-mail falhou")
+			return a.smtpFailure("auth", "autenticação do provedor de e-mail falhou", err)
 		}
 	}
-	if err = client.Mail(a.Config.SMTPFrom); err != nil {
-		return errors.New("remetente recusado pelo provedor")
+	if err = client.Mail(a.Config.Sender()); err != nil {
+		return a.smtpFailure("sender", "remetente recusado pelo provedor", err)
 	}
 	if err = client.Rcpt(to); err != nil {
-		return errors.New("destinatário recusado pelo provedor")
+		return a.smtpFailure("recipient", "destinatário recusado pelo provedor", err)
 	}
 	data, err := client.Data()
 	if err != nil {
-		return errors.New("provedor recusou a mensagem")
+		return a.smtpFailure("data", "provedor recusou a mensagem", err)
 	}
-	message := "From: " + a.Config.SMTPFrom + "\r\nTo: " + to + "\r\nSubject: " + subject + "\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n" + body + "\r\n"
+	message := a.mimeMessage(to, subject, body, htmlBody)
 	if _, err = data.Write([]byte(message)); err != nil {
-		return errors.New("falha no envio ao provedor")
+		return a.smtpFailure("write", "falha no envio ao provedor", err)
 	}
 	if err = data.Close(); err != nil {
-		return errors.New("provedor não confirmou o recebimento")
+		return a.smtpFailure("commit", "provedor não confirmou o recebimento", err)
 	}
 	_ = client.Quit()
 	return nil
@@ -82,7 +156,21 @@ func (a *App) prepareDelivery(s *domain.State, r domain.Request, kind, channel s
 	default:
 		client, org := s.Clients[r.ClientID], s.Organizations[r.OrgID]
 		link, _ := a.issueLink(s, r)
-		body := fmt.Sprintf("Olá, %s.\n\n%s solicita: %s (%s).\nPrazo: %s.\n\nEnvie e acompanhe seus documentos: %s\n\nSe houver uma correção, consulte o motivo no portal.\n", client.ContactName, org.Name, r.Title, r.Competence, r.DueDate, link)
+		// This is the one message a client of the office receives, and the
+		// only one carrying text the office wrote -- its name, the title of
+		// the request, the contact's name. The layout escapes all of it.
+		content := emailContent{
+			Preheader: fmt.Sprintf("%s solicita: %s — prazo %s", org.Name, r.Title, civilDate(r.DueDate)),
+			Heading:   "Documentos solicitados",
+			Paragraphs: []string{
+				fmt.Sprintf("Olá, %s.", client.ContactName),
+				fmt.Sprintf("%s solicita: %s (%s).", org.Name, r.Title, competenceLabel(r.Competence)),
+				fmt.Sprintf("Prazo: %s.", civilDate(r.DueDate)),
+			},
+			Action: &emailAction{Label: "Enviar meus documentos", URL: link},
+			Note:   "Se houver uma correção, consulte o motivo no portal. Não é preciso criar conta para enviar.",
+		}
+		body, htmlBody := plainEmail(content), a.renderEmail(content)
 		d.Status = "pending"
 		effect = func() error {
 			status, reason := "accepted", ""
@@ -110,7 +198,7 @@ func (a *App) prepareDelivery(s *domain.State, r domain.Request, kind, channel s
 			}
 			if !allowed {
 				status = "failed"
-			} else if err := a.sendEmail(client.Email, "Documentos solicitados — "+org.Name, body); err != nil {
+			} else if err := a.sendEmailHTML(client.Email, "Documentos solicitados — "+org.Name, body, htmlBody); err != nil {
 				status, reason = "failed", err.Error()
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -161,6 +249,18 @@ func (a *App) notify(c *call) (any, error) {
 	c.S.Audit(c.Org.ID, c.User.ID, "notification.requested", r.ID)
 	return d, nil
 }
+
+// awaitingClient reports whether any item of the request still needs an upload
+// from the client: a required item never sent, or any item sent back for
+// correction.
+func awaitingClient(r domain.Request) bool {
+	for _, item := range r.Items {
+		if item.Status == "correction_required" || item.Status == "pending" && item.Required {
+			return true
+		}
+	}
+	return false
+}
 func (a *App) tick(ctx context.Context, now time.Time) {
 	effects := []func() error{}
 	err := a.Store.Run(ctx, true, func(s *domain.State) error {
@@ -209,6 +309,17 @@ func (a *App) tick(ctx context.Context, now time.Time) {
 				if !ok || !client.Active || client.OrgID != schedule.OrgID {
 					continue
 				}
+				// The allowance is checked here too, and client by client:
+				// a recurrence that outgrew the plan must stop adding, not
+				// become the one way around the limit. The run is left
+				// unrecorded, so the request appears by itself once the
+				// workspace frees a slot or moves up a plan.
+				if org, ok := s.Organizations[schedule.OrgID]; ok {
+					if limit := org.Entitlement().ActiveRequests; limit > 0 && activeRequests(s, org.ID) >= limit {
+						log.Printf("recurrence %s skipped client %s: organization %s is at its plan limit of %d active requests", id, clientID, org.ID, limit)
+						continue
+					}
+				}
 				r := newRequest(schedule.OrgID, client, t, schedule.Name, competence, execution.AddDate(0, 0, schedule.DueDays).Format("2006-01-02"))
 				r.Sensitive = schedule.Sensitive
 				r.ScheduleID = id
@@ -232,6 +343,12 @@ func (a *App) tick(ctx context.Context, now time.Time) {
 		for _, r := range s.Requests {
 			o := s.Organizations[r.OrgID]
 			if !o.RemindersEnabled || o.Demo || r.Status == "completed" || r.Status == "cancelled" {
+				continue
+			}
+			// Only remind while the client still has something to do. A request
+			// whose documents are all in review is waiting on the office, and a
+			// reminder there reads as if the upload had not arrived.
+			if !awaitingClient(r) {
 				continue
 			}
 			created, err := time.Parse(time.RFC3339, r.CreatedAt)
@@ -271,4 +388,32 @@ func (a *App) tick(ctx context.Context, now time.Time) {
 			_ = effect()
 		}
 	}
+}
+
+// mimeMessage builds the message itself. With an html part it is
+// multipart/alternative: the client picks, and a text-only reader still gets
+// a readable message.
+//
+// The html part is quoted-printable because its lines are long and SMTP caps
+// a line at a thousand characters. Breaking them by hand would break them
+// inside attributes; quoted-printable inserts soft breaks the receiver undoes.
+func (a *App) mimeMessage(to, subject, body, htmlBody string) string {
+	headers := "From: " + a.Config.Sender() + "\r\nTo: " + to +
+		"\r\nSubject: " + mime.QEncoding.Encode("utf-8", subject) +
+		"\r\nDate: " + time.Now().Format(time.RFC1123Z) +
+		"\r\nMessage-ID: <" + domain.ID() + "@" + messageIDDomain(a.Config.Sender()) + ">" +
+		"\r\nAuto-Submitted: auto-generated\r\nMIME-Version: 1.0\r\n"
+	if htmlBody == "" {
+		return headers + "Content-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n" + body + "\r\n"
+	}
+	// The boundary is random so that it cannot appear inside either part.
+	boundary := "docping-" + domain.ID()
+	var encoded strings.Builder
+	writer := quotedprintable.NewWriter(&encoded)
+	_, _ = writer.Write([]byte(htmlBody))
+	_ = writer.Close()
+	return headers + "Content-Type: multipart/alternative; boundary=\"" + boundary + "\"\r\n\r\n" +
+		"--" + boundary + "\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n" + body + "\r\n" +
+		"--" + boundary + "\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n" + encoded.String() + "\r\n" +
+		"--" + boundary + "--\r\n"
 }

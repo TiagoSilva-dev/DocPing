@@ -17,16 +17,46 @@ func ID() string {
 func Now() string { return time.Now().UTC().Format(time.RFC3339) }
 
 type Organization struct {
-	Email            string `json:"email"`
-	ID               string `json:"id"`
-	Name             string `json:"name"`
-	Demo             bool   `json:"demo"`
-	ClientLimit      int    `json:"clientLimit"`
-	Plan             string `json:"plan"`
-	RetentionDays    int    `json:"retentionDays"`
+	Email         string `json:"email"`
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Demo          bool   `json:"demo"`
+	ClientLimit   int    `json:"clientLimit"`
+	Plan          string `json:"plan"`
+	RetentionDays int    `json:"retentionDays"`
+	// AIReview is off, suggest or auto. Auto lets a confident Jev verdict move
+	// the item itself; suggest only records the verdict for a person to act on.
+	AIReview         string `json:"aiReview"`
 	ReminderDays     []int  `json:"reminderDays"`
 	RemindersEnabled bool   `json:"remindersEnabled"`
 	CreatedAt        string `json:"createdAt"`
+	// Billing. These live in the stored payload, never in a column: the
+	// migration list runs on every boot and MySQL has no ADD COLUMN IF NOT
+	// EXISTS, so an evolving field belongs in the JSON aggregate.
+	//
+	// SubscriptionStatus is Stripe's own vocabulary, copied verbatim
+	// (active, trialing, past_due, canceled, unpaid, incomplete...), because
+	// translating it here would only hide what the provider actually said.
+	// The empty value means this workspace never subscribed.
+	SubscriptionStatus string `json:"subscriptionStatus,omitempty"`
+	StripeCustomerID   string `json:"stripeCustomerId,omitempty"`
+	SubscriptionID     string `json:"stripeSubscriptionId,omitempty"`
+	// PeriodEnd is when the paid period runs out, UTC RFC3339. It is what the
+	// workspace shows; it is never what grants access — the status is.
+	PeriodEnd string `json:"currentPeriodEnd,omitempty"`
+	// CancelAtPeriodEnd marks a subscription that Stripe will not renew. The
+	// workspace keeps working until PeriodEnd, so this is a notice, not a lock.
+	CancelAtPeriodEnd bool `json:"cancelAtPeriodEnd,omitempty"`
+	// BillingUpdatedAt is the Stripe event timestamp that produced the state
+	// above, as RFC3339. Webhook deliveries arrive out of order and repeat, so
+	// an event older than this one is ignored instead of overwriting newer
+	// truth with stale truth.
+	BillingUpdatedAt string `json:"billingUpdatedAt,omitempty"`
+	// BillingAlert records a dispute, a refund or an early fraud warning so a
+	// person can look. It never suspends the workspace by itself: money
+	// disputed is a conversation, not a reason to lock an accountant out of a
+	// client's documents mid-closing.
+	BillingAlert string `json:"billingAlert,omitempty"`
 }
 type User struct {
 	ID           string `json:"id"`
@@ -35,7 +65,12 @@ type User struct {
 	Email        string `json:"email"`
 	PasswordHash string `json:"-"`
 	StoredHash   string `json:"passwordHash,omitempty"`
-	CreatedAt    string `json:"createdAt"`
+	// EmailPending gates login until the address is confirmed. The zero value
+	// means "not pending", so every account stored before this field existed
+	// keeps working without a data migration; only new registrations set it.
+	EmailPending    bool   `json:"emailPending,omitempty"`
+	EmailVerifiedAt string `json:"emailVerifiedAt,omitempty"`
+	CreatedAt       string `json:"createdAt"`
 }
 type Session struct {
 	Hash      string `json:"hash"`
@@ -71,20 +106,63 @@ type Template struct {
 	Active      bool           `json:"active"`
 	CreatedAt   string         `json:"createdAt"`
 }
+
+// ScanUnscanned is the only status an upload is stored with: the product has no
+// malware scanner. The field remains because stored files still carry what the
+// scanner wrote while it existed.
+const ScanUnscanned = "unscanned"
+
 type DocumentFile struct {
-	ID         string `json:"id"`
-	Name       string `json:"name"`
-	MIMEType   string `json:"mimeType"`
-	Size       int64  `json:"size"`
-	CreatedAt  string `json:"createdAt"`
-	ScanStatus string `json:"scanStatus"`
-	ObjectKey  string `json:"objectKey,omitempty"`
-	SHA256     string `json:"sha256,omitempty"`
-	Superseded bool   `json:"superseded"`
-	Sample     bool   `json:"sample,omitempty"`
+	ID         string    `json:"id"`
+	Name       string    `json:"name"`
+	MIMEType   string    `json:"mimeType"`
+	Size       int64     `json:"size"`
+	CreatedAt  string    `json:"createdAt"`
+	ScanStatus string    `json:"scanStatus"`
+	ObjectKey  string    `json:"objectKey,omitempty"`
+	SHA256     string    `json:"sha256,omitempty"`
+	Superseded bool      `json:"superseded"`
+	Sample     bool      `json:"sample,omitempty"`
+	Analysis   *Analysis `json:"analysis,omitempty"`
+}
+
+// AnalysisSignal keeps one Jev judgement verbatim. Storing the raw answers,
+// not only the verdict, lets the office see why a document was approved or
+// sent back, and lets a changed policy be re-applied without paying for
+// inference again.
+type AnalysisSignal struct {
+	Key        string  `json:"key"`
+	Label      string  `json:"label"`
+	Kind       string  `json:"kind"`
+	Answer     string  `json:"answer,omitempty"`
+	Value      float64 `json:"value"`
+	Confidence float64 `json:"confidence"`
+}
+
+// Analysis is the automated conformity check of a single uploaded file:
+// extraction (Docling, PaddleOCR as the OCR fallback) followed by Jev.
+// Status is queued, running, completed, failed or disabled; Verdict is
+// approved, review or rejected. A failed analysis never decides anything —
+// the item stays waiting for a person.
+type Analysis struct {
+	Status      string           `json:"status"`
+	Verdict     string           `json:"verdict,omitempty"`
+	Confidence  float64          `json:"confidence"`
+	Reason      string           `json:"reason,omitempty"`
+	Signals     []AnalysisSignal `json:"signals,omitempty"`
+	Extractor   string           `json:"extractor,omitempty"`
+	Model       string           `json:"model,omitempty"`
+	Characters  int              `json:"characters,omitempty"`
+	Applied     bool             `json:"applied"`
+	Error       string           `json:"error,omitempty"`
+	RequestedAt string           `json:"requestedAt,omitempty"`
+	CompletedAt string           `json:"completedAt,omitempty"`
 }
 type Review struct {
-	Action    string `json:"action"`
+	Action string `json:"action"`
+	// Source is empty for a person and "jev" when the automated analysis
+	// applied the decision, so the history never attributes it to a user.
+	Source    string `json:"source,omitempty"`
 	Reason    string `json:"reason,omitempty"`
 	UserID    string `json:"userId"`
 	CreatedAt string `json:"createdAt"`
@@ -123,6 +201,8 @@ type PublicToken struct {
 	VerifiedSessions map[string]string `json:"verifiedSessions,omitempty"`
 	CodeHash         string            `json:"codeHash,omitempty"`
 	CodeExpiresAt    string            `json:"codeExpiresAt,omitempty"`
+	CodeSentAt       string            `json:"codeSentAt,omitempty"`
+	CodeSends        int               `json:"codeSends,omitempty"`
 	CodeAttempts     int               `json:"codeAttempts,omitempty"`
 }
 type Schedule struct {
@@ -167,6 +247,18 @@ type Audit struct {
 	EntityID  string `json:"entityId"`
 	CreatedAt string `json:"createdAt"`
 }
+
+// EmailVerification proves the registrant controls the address. It carries
+// the address it was issued for: an account whose e-mail changed before the
+// link is used must not be confirmed by the stale token.
+type EmailVerification struct {
+	Hash      string `json:"hash"`
+	UserID    string `json:"userId"`
+	Email     string `json:"email"`
+	ExpiresAt string `json:"expiresAt"`
+	Used      bool   `json:"used"`
+	SentAt    string `json:"sentAt"`
+}
 type PasswordReset struct {
 	Hash      string `json:"hash"`
 	UserID    string `json:"userId"`
@@ -174,26 +266,167 @@ type PasswordReset struct {
 	Used      bool   `json:"used"`
 }
 type State struct {
-	Organizations map[string]Organization  `json:"organizations"`
-	Users         map[string]User          `json:"users"`
-	Sessions      map[string]Session       `json:"sessions"`
-	Clients       map[string]Client        `json:"clients"`
-	Templates     map[string]Template      `json:"templates"`
-	Requests      map[string]Request       `json:"requests"`
-	Tokens        map[string]PublicToken   `json:"tokens"`
-	Schedules     map[string]Schedule      `json:"schedules"`
-	Runs          map[string]ScheduleRun   `json:"runs"`
-	Deliveries    map[string]Delivery      `json:"deliveries"`
-	Audits        map[string]Audit         `json:"audits"`
-	Resets        map[string]PasswordReset `json:"resets"`
+	Organizations map[string]Organization      `json:"organizations"`
+	Users         map[string]User              `json:"users"`
+	Sessions      map[string]Session           `json:"sessions"`
+	Clients       map[string]Client            `json:"clients"`
+	Templates     map[string]Template          `json:"templates"`
+	Requests      map[string]Request           `json:"requests"`
+	Tokens        map[string]PublicToken       `json:"tokens"`
+	Schedules     map[string]Schedule          `json:"schedules"`
+	Runs          map[string]ScheduleRun       `json:"runs"`
+	Deliveries    map[string]Delivery          `json:"deliveries"`
+	Audits        map[string]Audit             `json:"audits"`
+	Resets        map[string]PasswordReset     `json:"resets"`
+	Verifications map[string]EmailVerification `json:"verifications"`
 }
 
 func NewState() *State {
-	return &State{Organizations: map[string]Organization{}, Users: map[string]User{}, Sessions: map[string]Session{}, Clients: map[string]Client{}, Templates: map[string]Template{}, Requests: map[string]Request{}, Tokens: map[string]PublicToken{}, Schedules: map[string]Schedule{}, Runs: map[string]ScheduleRun{}, Deliveries: map[string]Delivery{}, Audits: map[string]Audit{}, Resets: map[string]PasswordReset{}}
+	return &State{Organizations: map[string]Organization{}, Users: map[string]User{}, Sessions: map[string]Session{}, Clients: map[string]Client{}, Templates: map[string]Template{}, Requests: map[string]Request{}, Tokens: map[string]PublicToken{}, Schedules: map[string]Schedule{}, Runs: map[string]ScheduleRun{}, Deliveries: map[string]Delivery{}, Audits: map[string]Audit{}, Resets: map[string]PasswordReset{}, Verifications: map[string]EmailVerification{}}
 }
+
+// AIReviewModes are the automated-review settings an organization may choose.
+// An organization stored before the feature existed reads as suggest: an
+// existing workspace never starts deciding on its own without being asked.
+const (
+	AIReviewOff     = "off"
+	AIReviewSuggest = "suggest"
+	AIReviewAuto    = "auto"
+)
+
+// NormalizeAIReview resolves the stored value, including the empty one.
+func NormalizeAIReview(mode string) string {
+	switch mode {
+	case AIReviewOff, AIReviewSuggest, AIReviewAuto:
+		return mode
+	}
+	return AIReviewSuggest
+}
+
+// Plans are the three subscriptions on sale, plus the two kinds of workspace
+// that exist without one. The slug is what the API and the stored payload
+// carry; the Stripe price that maps to it is configuration, because a price is
+// replaced in the dashboard without the code knowing.
+const (
+	PlanEssencial  = "essencial"
+	PlanEscritorio = "escritorio"
+	PlanRede       = "rede"
+	// PlanFounderPilot is every workspace opened before the subscription
+	// existed. They keep the entry terms for as long as they stay, which is
+	// what the landing page promises, so billing never locks them out.
+	PlanFounderPilot = "founder_pilot"
+	PlanDemo         = "demo"
+)
+
+// Entitlement is what a plan actually grants, checked by the server rather
+// than only printed on the pricing page.
+//
+// Only Clients is sold. It is the one figure the pricing page prints, the one
+// an office counts before buying, and the one the market prices on. The other
+// two are ceilings that protect the deployment -- an office that reaches one
+// of them has met a limit nobody told it about, so they are set far above any
+// honest use of the plan rather than close to it. They are zero when the plan
+// carries no figure of its own and the deployment-wide ceiling in the
+// configuration applies instead.
+type Entitlement struct {
+	Plan           string
+	Clients        int
+	ActiveRequests int
+	StorageBytes   int64
+}
+
+const gib = 1 << 30
+
+// sold builds an entitlement from the only number that is sold. Six open
+// requests per client covers a year-end with monthly, quarterly and annual
+// collections open at once; two gigabytes per client is several years of
+// documents. Deriving them keeps the ceilings tied to the promise: raise the
+// clients a plan sells and its room grows with it, instead of silently
+// becoming tight.
+func sold(name string, clients int) Entitlement {
+	return Entitlement{
+		Plan:           name,
+		Clients:        clients,
+		ActiveRequests: clients * 6,
+		StorageBytes:   int64(clients) * 2 * gib,
+	}
+}
+
+// entitlements mirrors the client figures printed on the pricing page. They
+// are the promise being sold: change one here and change it there in the same
+// commit.
+var entitlements = map[string]Entitlement{
+	PlanEssencial:  sold(PlanEssencial, 20),
+	PlanEscritorio: sold(PlanEscritorio, 60),
+	PlanRede:       sold(PlanRede, 150),
+	// The pilot and the demonstration carry no figures of their own: the
+	// deployment ceiling is their only limit, as it was before billing.
+	PlanFounderPilot: {Plan: PlanFounderPilot},
+	PlanDemo:         {Plan: PlanDemo},
+}
+
+// EffectiveClientLimit is how many active clients an organization may hold.
+// The plan decides it when the plan sells a figure; the stored ClientLimit
+// answers for the workspaces that never bought one -- the founder pilot and
+// the demonstration -- exactly as it did before billing existed.
+func EffectiveClientLimit(o Organization) int {
+	if e := PlanEntitlement(o.Plan); e.Clients > 0 {
+		return e.Clients
+	}
+	return o.ClientLimit
+}
+
+// PlanEntitlement resolves what a stored plan grants. An unknown plan — a slug
+// from a newer version, or a typo — reads as the smallest paid plan rather
+// than as unlimited: the failure mode of a mistake here must cost the customer
+// nothing and never hand out what nobody paid for.
+func PlanEntitlement(plan string) Entitlement {
+	if e, ok := entitlements[plan]; ok {
+		return e
+	}
+	return entitlements[PlanEssencial]
+}
+
+// SubscriptionStatuses that Stripe reports. Only the first three let a
+// workspace keep writing.
+const (
+	SubscriptionActive   = "active"
+	SubscriptionTrialing = "trialing"
+	// SubscriptionPastDue is a payment that failed and is still being retried.
+	// Access continues during the retries, with a warning in the workspace:
+	// Stripe has not given up on the card yet, and neither should the product.
+	SubscriptionPastDue = "past_due"
+)
+
+// Entitled answers whether this organization may still create work. A
+// demonstration and a founder pilot always may — neither ever subscribed, and
+// neither is a paying customer whose payment could lapse. Everyone else needs
+// a subscription Stripe still considers alive.
+func (o Organization) Entitled() bool {
+	if o.Demo || o.Plan == PlanFounderPilot {
+		return true
+	}
+	switch o.SubscriptionStatus {
+	case SubscriptionActive, SubscriptionTrialing, SubscriptionPastDue:
+		return true
+	}
+	return false
+}
+
+// Entitlement is the resolved allowance of this organization's plan.
+func (o Organization) Entitlement() Entitlement { return PlanEntitlement(o.Plan) }
+
 func (s *State) Audit(org, user, action, id string) {
 	a := Audit{ID: ID(), OrgID: org, UserID: user, Action: action, EntityID: id, CreatedAt: Now()}
 	s.Audits[a.ID] = a
+}
+func approvedAll(items []RequestItem) bool {
+	for _, i := range items {
+		if i.Status != "approved" {
+			return false
+		}
+	}
+	return true
 }
 func Recalculate(r *Request) {
 	if r.Status == "cancelled" {
@@ -220,6 +453,10 @@ func Recalculate(r *Request) {
 	switch {
 	case required > 0 && approved == required && !uploaded && !correction:
 		r.Status = "completed"
+	// A snapshot can hold only optional items, so completion also has to be
+	// reachable when every item was approved and none is required.
+	case required == 0 && len(r.Items) > 0 && approvedAll(r.Items):
+		r.Status = "completed"
 	case correction:
 		r.Status = "correction_required"
 	case uploaded:
@@ -229,6 +466,22 @@ func Recalculate(r *Request) {
 	default:
 		r.Status = "pending"
 	}
+}
+
+// PortalRequest is what the client outside the office may see. On top of the
+// object identity PublicRequest removes, it hides the automated analysis: the
+// client reads the correction reason, never the internal signals or scores.
+func PortalRequest(r Request) Request {
+	r = PublicRequest(r)
+	for n := range r.Items {
+		for j := range r.Items[n].Files {
+			r.Items[n].Files[j].Analysis = nil
+		}
+		for j := range r.Items[n].Reviews {
+			r.Items[n].Reviews[j].UserID = ""
+		}
+	}
+	return r
 }
 func PublicRequest(r Request) Request {
 	r.Items = append([]RequestItem{}, r.Items...)

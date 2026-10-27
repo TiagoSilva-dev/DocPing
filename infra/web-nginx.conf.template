@@ -1,0 +1,78 @@
+worker_processes auto;
+pid /tmp/nginx.pid;
+error_log /dev/stderr warn;
+events { worker_connections 1024; }
+http {
+  include /etc/nginx/mime.types;
+  default_type application/octet-stream;
+  access_log off;
+  sendfile on;
+  client_body_temp_path /tmp/client_temp;
+  proxy_temp_path /tmp/proxy_temp;
+  fastcgi_temp_path /tmp/fastcgi_temp;
+  uwsgi_temp_path /tmp/uwsgi_temp;
+  scgi_temp_path /tmp/scgi_temp;
+  server {
+    listen ${PORT};
+    server_name _;
+    root /usr/share/nginx/html;
+    client_max_body_size 51m;
+    add_header X-Content-Type-Options nosniff always;
+    add_header Referrer-Policy no-referrer always;
+    location /api/ {
+      # nginx resolves a literal upstream once, at startup, and refuses to boot
+      # if the name does not exist yet. On a managed host the API service may
+      # come up after this one, which would leave the site crash-looping. A
+      # variable in proxy_pass defers resolution to request time instead, and
+      # NGINX_LOCAL_RESOLVERS is exported by the image's own entrypoint.
+      resolver ${NGINX_LOCAL_RESOLVERS} valid=10s;
+      set $docping_api ${API_UPSTREAM};
+      proxy_pass $docping_api$request_uri;
+      proxy_http_version 1.1;
+      proxy_set_header Host $host;
+      proxy_set_header X-Forwarded-Proto $scheme;
+      # The API rate-limits per client address; without these the whole site
+      # shares the proxy's single address and one visitor can lock out the rest.
+      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+      proxy_set_header X-Real-IP $remote_addr;
+      proxy_set_header Connection "";
+      proxy_request_buffering off;
+      proxy_buffering off;
+      proxy_cache off;
+      proxy_read_timeout 120s;
+    }
+    location /assets/ {
+      expires 1y;
+      add_header Cache-Control "public, immutable";
+      add_header Referrer-Policy no-referrer always;
+      add_header X-Content-Type-Options nosniff always;
+      try_files $uri =404;
+    }
+    # robots.txt and the sitemap are the two files a crawler asks for before
+    # anything else; they are static and may be cached for a while.
+    location ~ ^/(robots\.txt|sitemap\.xml)$ {
+      add_header Cache-Control "public, max-age=3600";
+      add_header Referrer-Policy no-referrer always;
+      add_header X-Content-Type-Options nosniff always;
+      try_files $uri =404;
+    }
+    # The workspace, the client portal and the auth forms are served by the same
+    # index.html as the landing page, so a crawler cannot tell them apart from
+    # the markup alone. The portal links are access tokens; this header keeps
+    # them out of an index even for a crawler that ignores robots.txt, and does
+    # not depend on the page's JavaScript having run.
+    location ~ ^/(app|p|portal|entrar|cadastro|esqueci-senha|redefinir-senha|confirmar-email|assinar)(/|$) {
+      add_header X-Robots-Tag "noindex, nofollow" always;
+      add_header Cache-Control "no-store";
+      add_header Referrer-Policy no-referrer always;
+      add_header X-Content-Type-Options nosniff always;
+      try_files $uri $uri/ /index.html;
+    }
+    location / {
+      add_header Cache-Control "no-store";
+      add_header Referrer-Policy no-referrer always;
+      add_header X-Content-Type-Options nosniff always;
+      try_files $uri $uri/ /index.html;
+    }
+  }
+}

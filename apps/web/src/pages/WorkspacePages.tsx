@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   Archive,
   ArrowDown,
@@ -14,17 +14,21 @@ import {
   FileText,
   History,
   Mail,
+  MessageCircle,
   Pause,
   Pencil,
   Play,
   Plus,
+  RotateCcw,
   Search,
   Trash2,
   Upload,
   Users,
   X,
 } from "lucide-react";
-import { api, post, put } from "@/lib/api";
+import { api, openBillingPortal, post, put } from "@/lib/api";
+import { planName, subscriptionLabel } from "@/lib/plans";
+import { usePageMeta } from "@/lib/seo";
 import type {
   Client,
   Organization,
@@ -613,7 +617,85 @@ function ClientImport({
   );
 }
 
+// ChaseInvite is the step that turns a cadastro into a cobranca. Registering
+// a client accomplishes nothing by itself: what the office wants is the
+// documents, and the client cannot send anything until a solicitacao exists
+// and its link reaches them.
+//
+// It asks instead of acting. The first message a client ever receives from an
+// office carries that office's name, so what goes out and when is the
+// office's call -- and an automatic send here would also be the one e-mail
+// nobody consented to. Saying no costs one click and the invite never
+// returns for that client.
+function ChaseInvite({
+  client,
+  onClose,
+}: {
+  client: Client;
+  onClose: () => void;
+}) {
+  const navigate = useNavigate();
+  const reachable = Boolean(client.email || client.phone);
+  return (
+    <Modal
+      title="Cobrar os documentos agora?"
+      description={`${client.name} está cadastrado. Falta pedir o que você precisa.`}
+      onClose={onClose}
+    >
+      <p className="wp-dialog-copy">
+        Vamos montar a primeira solicitação a partir de um dos seus modelos e
+        gerar o link que <strong>{client.contactName || client.name}</strong>{" "}
+        usa para enviar os arquivos — sem criar conta e sem instalar nada.
+      </p>
+      {reachable ? (
+        <ul className="wp-chase-channels">
+          {client.email && (
+            <li>
+              <Mail size={15} />
+              <div>
+                <strong>E-mail</strong>
+                <span>{client.email}</span>
+              </div>
+            </li>
+          )}
+          {client.phone && (
+            <li>
+              <MessageCircle size={15} />
+              <div>
+                <strong>WhatsApp</strong>
+                <span>
+                  {client.phone} — abrimos a conversa com a mensagem pronta para
+                  você conferir e enviar
+                </span>
+              </div>
+            </li>
+          )}
+        </ul>
+      ) : (
+        <p className="wp-dialog-copy">
+          Este cliente não tem e-mail nem telefone cadastrado, então só o link
+          copiável fica disponível. Você pode adicionar um contato depois e
+          cobrar pelos dois canais.
+        </p>
+      )}
+      <div className="form-actions">
+        <Button variant="secondary" onClick={onClose}>
+          Depois
+        </Button>
+        <Button
+          onClick={() =>
+            navigate(`/app/solicitacoes/nova?cliente=${client.id}`)
+          }
+        >
+          Cobrar documentos
+          <ArrowRight size={15} />
+        </Button>
+      </div>
+    </Modal>
+  );
+}
 export function ClientsPage() {
+  usePageMeta({ title: "Clientes — DocPing" });
   const query = useQuery({
     queryKey: ["clients"],
     queryFn: () => api<Client[]>("/clients"),
@@ -631,11 +713,16 @@ export function ClientsPage() {
     }
   }, [searchParam]);
   const [editor, setEditor] = useState<Client | "new" | null>(null);
+  // A client that was just created and has nothing to send yet. Cadastrar is
+  // not the point -- being asked for the documents is -- so the moment the
+  // client exists we offer to charge for them, once, and never nag again.
+  const [chasing, setChasing] = useState<Client | null>(null);
   const [importing, setImporting] = useState(false);
   const [archiving, setArchiving] = useState<Client | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const toast = useToast();
   const clients = query.data ?? [];
   const filtered = clients.filter(
@@ -879,7 +966,13 @@ export function ClientsPage() {
         <ClientEditor
           client={editor === "new" ? null : editor}
           onClose={() => setEditor(null)}
+          onSaved={(saved) => {
+            if (editor === "new") setChasing(saved);
+          }}
         />
+      )}
+      {chasing && (
+        <ChaseInvite client={chasing} onClose={() => setChasing(null)} />
       )}
       {importing && (
         <ClientImport existing={clients} onClose={() => setImporting(false)} />
@@ -1173,33 +1266,34 @@ function TemplateEditor({
 }
 
 export function TemplatesPage() {
+  usePageMeta({ title: "Modelos — DocPing" });
   const query = useQuery({
     queryKey: ["templates"],
     queryFn: () => api<Template[]>("/templates"),
   });
   const [editor, setEditor] = useState<Template | "new" | null>(null);
   const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState<"active" | "archived" | "all">("active");
   const [archiving, setArchiving] = useState<Template | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const queryClient = useQueryClient();
   const toast = useToast();
-  const templates = (query.data ?? []).filter((template) =>
-    `${template.name} ${template.description}`
-      .toLowerCase()
-      .includes(search.toLowerCase()),
+  const all = query.data ?? [];
+  const templates = all.filter(
+    (template) =>
+      (filter === "all" || template.active === (filter === "active")) &&
+      `${template.name} ${template.description}`
+        .toLowerCase()
+        .includes(search.toLowerCase()),
   );
-  async function archiveTemplate(template: Template) {
+  async function setArchived(template: Template, archived: boolean) {
     setSaving(true);
     setError("");
     try {
-      await put(`/templates/${template.id}`, {
-        name: template.name,
-        description: template.description,
-        active: false,
-      });
+      await put(`/templates/${template.id}`, { active: !archived });
       await queryClient.invalidateQueries({ queryKey: ["templates"] });
-      toast("Modelo arquivado.");
+      toast(archived ? "Modelo arquivado." : "Modelo reativado.");
       setArchiving(null);
     } catch (err) {
       setError(message(err));
@@ -1221,9 +1315,34 @@ export function TemplatesPage() {
         }
       />
       <div className="wp-template-toolbar">
-        <span className="muted small">
-          {query.data?.length ?? 0} modelos na sua biblioteca
-        </span>
+        <div className="wp-tabs" aria-label="Filtrar modelos">
+          {(
+            [
+              ["active", "Ativos"],
+              ["archived", "Arquivados"],
+              ["all", "Todos"],
+            ] as const
+          ).map(([value, label]) => (
+            <button
+              type="button"
+              className={filter === value ? "wp-tab wp-tab-active" : "wp-tab"}
+              key={value}
+              aria-pressed={filter === value}
+              onClick={() => setFilter(value)}
+            >
+              {label}
+              <span>
+                {
+                  all.filter(
+                    (template) =>
+                      value === "all" ||
+                      template.active === (value === "active"),
+                  ).length
+                }
+              </span>
+            </button>
+          ))}
+        </div>
         <label className="wp-search">
           <Search size={16} />
           <input
@@ -1244,15 +1363,19 @@ export function TemplatesPage() {
             title={
               search
                 ? "Nenhum modelo encontrado"
-                : "Sua primeira lista de documentos"
+                : filter === "archived"
+                  ? "Nenhum modelo arquivado"
+                  : "Sua primeira lista de documentos"
             }
             description={
               search
                 ? "Tente outro nome para encontrar seu modelo."
-                : "Crie um modelo para não precisar escrever a mesma lista todos os meses."
+                : filter === "archived"
+                  ? "Modelos arquivados ficam aqui e podem ser reativados quando precisar."
+                  : "Crie um modelo para não precisar escrever a mesma lista todos os meses."
             }
             action={
-              !search ? (
+              !search && filter !== "archived" ? (
                 <Button onClick={() => setEditor("new")}>
                   <Plus size={16} />
                   Criar modelo
@@ -1264,25 +1387,38 @@ export function TemplatesPage() {
       ) : (
         <div className="wp-template-grid">
           {templates.map((template, index) => (
-            <article className="panel wp-template-card" key={template.id}>
+            <article
+              className={`panel wp-template-card ${template.active ? "" : "wp-template-archived"}`}
+              key={template.id}
+            >
               <div className="wp-template-card-top">
                 <span className="wp-document-icon">
                   <FileText size={22} strokeWidth={1.5} />
                 </span>
                 <div className="wp-template-card-tools">
                   <span className="wp-model-index mono">
-                    MODELO {String(index + 1).padStart(2, "0")}
+                    {template.active
+                      ? `MODELO ${String(index + 1).padStart(2, "0")}`
+                      : "ARQUIVADO"}
                   </span>
                   <Button
                     variant="ghost"
-                    aria-label={`Arquivar modelo ${template.name}`}
-                    title="Arquivar modelo"
+                    aria-label={`${template.active ? "Arquivar" : "Reativar"} modelo ${template.name}`}
+                    title={
+                      template.active ? "Arquivar modelo" : "Reativar modelo"
+                    }
+                    disabled={saving}
                     onClick={() => {
                       setError("");
-                      setArchiving(template);
+                      if (template.active) setArchiving(template);
+                      else void setArchived(template, false);
                     }}
                   >
-                    <Archive size={14} />
+                    {template.active ? (
+                      <Archive size={14} />
+                    ) : (
+                      <RotateCcw size={14} />
+                    )}
                   </Button>
                 </div>
               </div>
@@ -1348,9 +1484,10 @@ export function TemplatesPage() {
           onClose={saving ? () => undefined : () => setArchiving(null)}
         >
           <p className="wp-dialog-copy">
-            <strong>{archiving.name}</strong> deixará de aparecer na biblioteca.
-            As solicitações existentes manterão seus documentos. Recorrências
-            com este modelo precisarão de um novo modelo ativo.
+            <strong>{archiving.name}</strong> sai da lista de modelos ativos. As
+            solicitações existentes manterão seus documentos. Recorrências com
+            este modelo precisarão de um novo modelo ativo. Você pode reativá-lo
+            depois na aba Arquivados.
           </p>
           {error && (
             <p className="inline-error" role="alert">
@@ -1367,7 +1504,7 @@ export function TemplatesPage() {
             </Button>
             <Button
               loading={saving}
-              onClick={() => void archiveTemplate(archiving)}
+              onClick={() => void setArchived(archiving, true)}
             >
               Arquivar modelo
             </Button>
@@ -1725,6 +1862,7 @@ function ScheduleEditor({
 }
 
 export function SchedulesPage() {
+  usePageMeta({ title: "Recorrências — DocPing" });
   const schedules = useQuery({
     queryKey: ["schedules"],
     queryFn: () => api<Schedule[]>("/schedules"),
@@ -1742,8 +1880,13 @@ export function SchedulesPage() {
   const [history, setHistory] = useState<Schedule | null>(null);
   const queryClient = useQueryClient();
   const toast = useToast();
+  // The models list includes archived ones so they stay reactivatable; a
+  // recurrence can only be built on an active model.
+  const activeTemplates = (templates.data ?? []).filter(
+    (template) => template.active,
+  );
   const canCreate =
-    !!templates.data?.length && !!clients.data?.some((client) => client.active);
+    !!activeTemplates.length && !!clients.data?.some((client) => client.active);
   async function toggle(schedule: Schedule) {
     setToggling(schedule.id);
     try {
@@ -1863,9 +2006,15 @@ export function SchedulesPage() {
                   </span>
                 </div>
                 <p>
-                  {templates.data?.find(
-                    (template) => template.id === schedule.templateId,
-                  )?.name || "Modelo arquivado — selecione outro"}
+                  {(() => {
+                    const model = templates.data?.find(
+                      (template) => template.id === schedule.templateId,
+                    );
+                    if (!model) return "Modelo removido — selecione outro";
+                    return model.active
+                      ? model.name
+                      : `${model.name} — arquivado, selecione outro`;
+                  })()}
                   <span>·</span>
                   {schedule.clientIds.length}{" "}
                   {schedule.clientIds.length === 1 ? "cliente" : "clientes"}
@@ -1927,10 +2076,10 @@ export function SchedulesPage() {
           WhatsApp continua sendo manual.
         </span>
       </p>
-      {editor && templates.data && clients.data && (
+      {editor && activeTemplates.length > 0 && clients.data && (
         <ScheduleEditor
           schedule={editor === "new" ? null : editor}
-          templates={templates.data}
+          templates={activeTemplates}
           clients={clients.data}
           onClose={() => setEditor(null)}
         />
@@ -1947,6 +2096,7 @@ export function SchedulesPage() {
 }
 
 export function SettingsPage() {
+  usePageMeta({ title: "Configurações — DocPing" });
   const { session } = useSession();
   const organization = session.organization;
   const [draft, setDraft] = useState<Organization>({ ...organization });
@@ -1955,6 +2105,9 @@ export function SettingsPage() {
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [billingPending, setBillingPending] = useState(false);
+  const [billingError, setBillingError] = useState("");
+  const billing = session.billing;
   const queryClient = useQueryClient();
   const toast = useToast();
   useEffect(() => {
@@ -1991,6 +2144,7 @@ export function SettingsPage() {
           ? reminderDays.sort((a, b) => a - b)
           : (organization.reminderDays ?? [3, 6]),
         retentionDays: draft.retentionDays ?? 365,
+        aiReview: draft.aiReview ?? "suggest",
       });
       await queryClient.invalidateQueries({ queryKey: ["session"] });
       toast("Configurações do escritório salvas.");
@@ -2097,6 +2251,71 @@ export function SettingsPage() {
             <div className="wp-settings-section-title">
               <span className="wp-section-number mono">03</span>
               <div>
+                <h2>Análise automática de documentos</h2>
+                <p>
+                  Cada arquivo enviado é lido e conferido contra o que foi
+                  solicitado antes de chegar à sua revisão.
+                </p>
+              </div>
+            </div>
+            <div
+              className="wp-choice-group"
+              role="radiogroup"
+              aria-label="Análise automática de documentos"
+            >
+              {(
+                [
+                  {
+                    value: "auto",
+                    title: "Aprovar e reprovar automaticamente",
+                    hint: "Documentos com todos os critérios conferidos são aprovados sozinhos; os reprovados voltam ao cliente com o motivo. Qualquer dúvida continua vindo para você.",
+                  },
+                  {
+                    value: "suggest",
+                    title: "Apenas sugerir",
+                    hint: "O resultado aparece na tela de revisão, mas a decisão continua sendo sua.",
+                  },
+                  {
+                    value: "off",
+                    title: "Desativada",
+                    hint: "Nenhum documento é enviado para análise.",
+                  },
+                ] as const
+              ).map((option) => (
+                <label
+                  key={option.value}
+                  className={
+                    (draft.aiReview ?? "suggest") === option.value
+                      ? "wp-choice active"
+                      : "wp-choice"
+                  }
+                >
+                  <input
+                    type="radio"
+                    name="aiReview"
+                    value={option.value}
+                    checked={(draft.aiReview ?? "suggest") === option.value}
+                    onChange={() =>
+                      setDraft((prev) => ({ ...prev, aiReview: option.value }))
+                    }
+                  />
+                  <div>
+                    <strong>{option.title}</strong>
+                    <span>{option.hint}</span>
+                  </div>
+                </label>
+              ))}
+            </div>
+            <p className="wp-settings-help">
+              A leitura usa Docling, com PaddleOCR para fotos e digitalizações,
+              e a conferência usa o modelo Jev. Se a análise falhar, o documento
+              segue para revisão manual — nada é aprovado sem conferência.
+            </p>
+          </section>
+          <section className="panel wp-settings-section">
+            <div className="wp-settings-section-title">
+              <span className="wp-section-number mono">04</span>
+              <div>
                 <h2>Retenção de documentos</h2>
                 <p>
                   Defina por quanto tempo o escritório precisa manter os
@@ -2133,6 +2352,89 @@ export function SettingsPage() {
               </select>
             </Field>
           </section>
+          {billing?.enabled && (
+            <section className="panel wp-settings-section">
+              <div className="wp-settings-section-title">
+                <span className="wp-section-number mono">05</span>
+                <div>
+                  <h2>Plano e cobrança</h2>
+                  <p>
+                    O pagamento é processado pela Stripe. Trocar de plano, mudar
+                    o cartão ou cancelar acontece na área de cobrança dela.
+                  </p>
+                </div>
+              </div>
+              <dl className="wp-billing-facts">
+                <div>
+                  <dt>Plano</dt>
+                  <dd>{planName(billing.plan)}</dd>
+                </div>
+                <div>
+                  <dt>Assinatura</dt>
+                  <dd>
+                    <span
+                      className={`wp-billing-dot wp-billing-dot-${billing.entitled ? "ok" : "off"}`}
+                      aria-hidden
+                    />
+                    {subscriptionLabel(billing.status)}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Solicitações ativas</dt>
+                  <dd>
+                    {billing.activeRequests}
+                    {billing.limits.activeRequests > 0
+                      ? ` de ${billing.limits.activeRequests}`
+                      : ""}
+                  </dd>
+                </div>
+                {billing.periodEnd && (
+                  <div>
+                    <dt>
+                      {billing.cancelAtPeriodEnd ? "Encerra em" : "Renova em"}
+                    </dt>
+                    <dd>{dateLabel(billing.periodEnd)}</dd>
+                  </div>
+                )}
+              </dl>
+              {billing.cancelAtPeriodEnd && (
+                <p className="wp-billing-note" role="status">
+                  A assinatura está marcada para não renovar. O escritório
+                  continua funcionando até o fim do período pago.
+                </p>
+              )}
+              {billingError && (
+                <p className="inline-error" role="alert">
+                  {billingError}
+                </p>
+              )}
+              <div className="wp-billing-actions">
+                {billing.manageable ? (
+                  <Button
+                    type="button"
+                    loading={billingPending}
+                    onClick={async () => {
+                      setBillingError("");
+                      setBillingPending(true);
+                      try {
+                        const { url } = await openBillingPortal();
+                        window.location.assign(url);
+                      } catch (err) {
+                        setBillingError(message(err));
+                        setBillingPending(false);
+                      }
+                    }}
+                  >
+                    Abrir área de cobrança
+                  </Button>
+                ) : (
+                  <Link to="/assinar">
+                    <Button type="button">Escolher um plano</Button>
+                  </Link>
+                )}
+              </div>
+            </section>
+          )}
           {error && (
             <p className="inline-error" role="alert">
               {error}

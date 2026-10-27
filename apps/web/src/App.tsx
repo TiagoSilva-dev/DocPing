@@ -2,6 +2,8 @@ import {
   Component,
   Suspense,
   lazy,
+  useEffect,
+  useState,
   type ErrorInfo,
   type ReactNode,
 } from "react";
@@ -20,7 +22,10 @@ import { api, ApiError, getSession, post } from "@/lib/api";
 import { SessionContext } from "@/lib/session";
 import { ToastProvider } from "@/lib/toast";
 import { Shell } from "@/components/Shell";
+import { usePageMeta } from "@/lib/seo";
 import { Button, Logo, Loading, ErrorState } from "@/components/shared";
+import { CookieNotice } from "@/components/CookieNotice";
+import { pageView } from "@/lib/consent";
 const Dashboard = lazy(() =>
   import("@/pages/Dashboard").then((m) => ({ default: m.Dashboard })),
 );
@@ -33,6 +38,7 @@ const CreateRequest = lazy(() =>
 const RequestDetail = lazy(() =>
   import("@/pages/RequestDetail").then((m) => ({ default: m.RequestDetail })),
 );
+const Subscribe = lazy(() => import("@/pages/Subscribe"));
 const PortalPage = lazy(() =>
   import("@/pages/Portal").then((m) => ({ default: m.PortalPage })),
 );
@@ -51,6 +57,9 @@ const SettingsPage = lazy(() =>
 const AuthPage = lazy(() =>
   import("@/pages/AuthPages").then((m) => ({ default: m.AuthPage })),
 );
+const VerifyEmailPage = lazy(() =>
+  import("@/pages/AuthPages").then((m) => ({ default: m.VerifyEmailPage })),
+);
 const ForgotPasswordPage = lazy(() =>
   import("@/pages/AuthPages").then((m) => ({ default: m.ForgotPasswordPage })),
 );
@@ -60,6 +69,22 @@ const ResetPasswordPage = lazy(() =>
 const Landing = lazy(() =>
   import("@/pages/Landing").then((m) => ({ default: m.Landing })),
 );
+const PrivacyPage = lazy(() =>
+  import("@/pages/Legal").then((m) => ({ default: m.PrivacyPage })),
+);
+const TermsPage = lazy(() =>
+  import("@/pages/Legal").then((m) => ({ default: m.TermsPage })),
+);
+// A single-page app loads the measurement tag once, so without this only the
+// first page of a visit would ever be counted. It reports nothing until the
+// visitor has accepted -- see lib/consent.ts.
+function Measurement() {
+  const { pathname } = useLocation();
+  useEffect(() => {
+    pageView(pathname);
+  }, [pathname]);
+  return null;
+}
 function ProtectedLayout() {
   const queryClient = useQueryClient();
   const location = useLocation();
@@ -89,6 +114,16 @@ function ProtectedLayout() {
         onRetry={() => void refetch()}
       />
     );
+  // The workspace does not open without a subscription. This mirrors the gate
+  // the API applies to every authenticated route: the screen only decides
+  // where to send the person, never what they are allowed to do.
+  if (session.billing?.enabled && !session.billing.entitled)
+    return new URLSearchParams(location.search).get("assinatura") ===
+      "confirmada" ? (
+      <ConfirmingPayment />
+    ) : (
+      <Navigate to="/assinar" replace />
+    );
   return (
     <SessionContext.Provider
       value={{
@@ -104,7 +139,45 @@ function ProtectedLayout() {
     </SessionContext.Provider>
   );
 }
+// Checkout sends the browser back the moment the card clears, and the webhook
+// that records the subscription arrives on its own schedule -- usually within
+// seconds, occasionally later. Without this screen the return would bounce
+// off the gate and land back on the pricing page, which reads as "we took
+// your money and nothing happened". So the session is polled instead, and the
+// layout opens by itself the moment the subscription is recorded.
+function ConfirmingPayment() {
+  useQuery({
+    queryKey: ["session"],
+    queryFn: getSession,
+    retry: false,
+    refetchInterval: 2000,
+  });
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => setSlow(true), 20000);
+    return () => clearTimeout(timer);
+  }, []);
+  return (
+    <div className="confirming-payment">
+      <Logo />
+      <Loading />
+      <h1>Confirmando seu pagamento…</h1>
+      <p>
+        O pagamento foi aprovado. Estamos aguardando a confirmação da Stripe
+        para liberar o escritório — leva alguns segundos.
+      </p>
+      {slow && (
+        <p className="confirming-slow">
+          Está demorando mais que o normal. Nada se perdeu: a confirmação chega
+          e o escritório abre sozinho. Se preferir, atualize a página em alguns
+          minutos.
+        </p>
+      )}
+    </div>
+  );
+}
 function NotFound() {
+  usePageMeta({ title: "Página não encontrada — DocPing" });
   return (
     <div className="not-found-page">
       <Logo />
@@ -123,6 +196,7 @@ export default function App() {
       <MotionConfig reducedMotion="user">
         <ToastProvider>
           <BrowserRouter>
+            <Measurement />
             <Suspense fallback={<Loading />}>
               <Routes>
                 <Route path="/" element={<Landing />} />
@@ -133,6 +207,10 @@ export default function App() {
                   path="/redefinir-senha"
                   element={<ResetPasswordPage />}
                 />
+                <Route path="/confirmar-email" element={<VerifyEmailPage />} />
+                <Route path="/privacidade" element={<PrivacyPage />} />
+                <Route path="/termos" element={<TermsPage />} />
+                <Route path="/assinar" element={<Subscribe />} />
                 <Route path="/p/:token" element={<PortalPage />} />
                 <Route path="/portal/:token" element={<PortalPage />} />
                 <Route path="/app" element={<ProtectedLayout />}>
@@ -148,6 +226,7 @@ export default function App() {
                 <Route path="*" element={<NotFound />} />
               </Routes>
             </Suspense>
+            <CookieNotice />
           </BrowserRouter>
         </ToastProvider>
       </MotionConfig>

@@ -4,9 +4,8 @@
  * Uses only loopback API/MinIO/Mailpit endpoints and synthetic example.invalid data.
  * Never prints passwords, session cookies, public links, document contents or DSNs.
  *
- * node scripts/integration-smoke.mjs [--mysql] [--eicar]
+ * node scripts/integration-smoke.mjs [--mysql]
  * --mysql runs the opt-in Go MySQL persistence test, passing its DSN only via env.
- * --eicar also tests the harmless antivirus test signature embedded in a PDF.
  */
 import assert from 'node:assert/strict';
 import { randomBytes, randomUUID } from 'node:crypto';
@@ -89,13 +88,9 @@ const clientEmail = `client-${runID}@example.invalid`;
 const password = `${randomBytes(24).toString('base64url')}aA9!`;
 const organizationName = `DocPing integration ${runID.slice(0, 8)}`;
 
-function syntheticPDF(revision = 'original', attachment = null) {
+function syntheticPDF(revision = 'original') {
   const content = `BT /F1 14 Tf 48 740 Td (DOCPING - SYNTHETIC INTEGRATION SAMPLE) Tj 0 -24 Td /F1 10 Tf (No real company or personal data. Revision ${revision}.) Tj ET`;
   const objects = ['<< /Type /Catalog /Pages 2 0 R >>', '<< /Type /Pages /Kids [3 0 R] /Count 1 >>', '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>', '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>', `<< /Length ${Buffer.byteLength(content)} >>\nstream\n${content}\nendstream`];
-  if (attachment) {
-    objects[0] = '<< /Type /Catalog /Pages 2 0 R /Names << /EmbeddedFiles << /Names [(eicar.com) 6 0 R] >> >> /AF [6 0 R] >>';
-    objects.push('<< /Type /Filespec /F (eicar.com) /UF (eicar.com) /EF << /F 7 0 R >> /AFRelationship /Data >>', `<< /Type /EmbeddedFile /Length ${attachment.length} >>\nstream\n${attachment.toString('ascii')}\nendstream`);
-  }
   let out = '%PDF-1.4\n';
   const offsets = [];
   objects.forEach((object, index) => { offsets.push(Buffer.byteLength(out)); out += `${index + 1} 0 obj\n${object}\nendobj\n`; });
@@ -130,8 +125,18 @@ async function mailFor(recipient, subject) {
   }
   throw new Error('Mailpit did not contain the SMTP-accepted synthetic message.');
 }
+// Registration does not open a session where SMTP is configured: the API
+// answers verification_sent and mails a single-use link. The smoke confirms the
+// address through the real Mailpit message, which is also what proves the
+// confirmation e-mail actually leaves the API. The token is read but never
+// printed, like every other credential here.
 async function register(api, email, name) {
-  return (await api.request('POST', '/auth/register', { json: { organizationName: name, name: 'Integration tester', email, password } })).data;
+  const created = (await api.request('POST', '/auth/register', { json: { organizationName: name, name: 'Integration tester', email, password } })).data;
+  if (created.status !== 'verification_sent') return created;
+  const message = await mailFor(email, 'Confirme seu e-mail — DocPing');
+  const link = /\/confirmar-email\?token=([A-Za-z0-9_-]+)/.exec(`${message.Text ?? message.text ?? ''}\n${message.HTML ?? message.html ?? ''}`);
+  assert(link, 'Confirmation e-mail did not contain a verification link.');
+  return (await api.request('POST', '/auth/verify-email', { json: { token: link[1] } })).data;
 }
 let session, client, template, request, token, originalFile, pngFile, sensitive, sensitiveToken;
 try {
@@ -143,7 +148,7 @@ try {
     const mailpit = await fetch(`${mailpitBase}/api/v1/messages`, { signal: AbortSignal.timeout(5_000) });
     assert.equal(mailpit.status, 200, 'Mailpit API is not healthy.');
   });
-  await check('signup, session cookie and empty real organization', async () => {
+  await check('signup confirmed by e-mail, session cookie and empty real organization', async () => {
     session = await register(office, officeEmail, organizationName);
     assert.equal(session.organization.demo, false);
     assert(office.cookies.has('docping_session') && office.csrf, 'Session cookie/CSRF token missing.');
@@ -176,19 +181,17 @@ try {
     assert.equal(portal.request.id, request.id);
     assert(portal.maxUploadBytes > 0);
   });
-  await check('PDF passes actual ClamAV and private MinIO round trip', async () => {
+  await check('PDF round trips through private MinIO', async () => {
     request = await upload(anonymous, token, request.items[0].id, 'synthetic-statement.pdf', 'application/pdf', syntheticPDF());
     originalFile = request.items[0].files[0];
-    assert.equal(originalFile.scanStatus, 'clean', 'Scanner bypass is forbidden in this integration smoke.');
     assert(!originalFile.sample && !originalFile.objectKey, 'Uploaded file must be real private storage, without leaked object key.');
     const downloaded = (await office.request('GET', `/files/${originalFile.id}`, { binary: true })).data;
     assert(downloaded.equals(syntheticPDF()), 'Private object bytes changed.');
   });
-  await check('PNG passes actual ClamAV and independent upload', async () => {
+  await check('PNG uploads independently and round trips', async () => {
     request = await upload(anonymous, token, request.items[0].id, 'synthetic-pixel.png', 'image/png', png);
     assert.equal(request.items[0].files.length, 2);
     pngFile = request.items[0].files.find(file => file.mimeType === 'image/png');
-    assert.equal(pngFile.scanStatus, 'clean');
     const downloaded = (await anonymous.request('GET', `/files/${pngFile.id}?token=${encodeURIComponent(token)}`, { binary: true })).data;
     assert(downloaded.equals(png), 'PNG object bytes changed.');
   });
@@ -214,16 +217,6 @@ try {
     const text = message.Text ?? message.text ?? '';
     assert(text.includes('Synthetic integration collection') && text.includes('/p/'), 'Mailpit message does not contain the real request link.');
   });
-  if (process.argv.includes('--eicar')) {
-    await check('actual ClamAV rejects harmless EICAR signature', async () => {
-      const eicar = Buffer.from('X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*');
-      const testFile = syntheticPDF('antivirus-test', eicar);
-      const denied = await upload(anonymous, token, request.items[0].id, 'synthetic-antivirus-test.pdf', 'application/pdf', testFile, 422);
-      assert.equal(denied.error.code, 'malware_rejected');
-      const current = (await office.request('GET', `/requests/${request.id}`)).data;
-      assert.equal(current.items[0].files.length, 2, 'Rejected antivirus test was persisted.');
-    });
-  }
   await check('targeted correction preserves unaffected file and history', async () => {
     request = (await office.request('POST', `/requests/${request.id}/items/${request.items[0].id}/review`, { json: { action: 'correct', reason: 'Synthetic first PDF needs a replacement.', fileId: originalFile.id } })).data;
     assert.equal(request.status, 'correction_required');
@@ -233,7 +226,6 @@ try {
     assert(request.items[0].files.find(file => file.id === originalFile.id).superseded);
     assert(!request.items[0].files.find(file => file.id === pngFile.id).superseded);
     assert.equal(request.items[0].files.filter(file => !file.superseded).length, 2);
-    assert(request.items[0].files.every(file => file.scanStatus === 'clean'));
   });
   await check('approval completes request and closes additional uploads', async () => {
     request = (await office.request('POST', `/requests/${request.id}/items/${request.items[0].id}/review`, { json: { action: 'approve' } })).data;
@@ -290,7 +282,7 @@ try {
       assert(result.stdout.includes('--- PASS: TestMySQLRoundTrip') && !result.stdout.includes('--- SKIP:'), 'MySQL integration did not execute.');
     });
   }
-  const report = { status: 'passed', completedAt: new Date().toISOString(), elapsedMs: Date.now() - started, checks, notExecuted: [!process.argv.includes('--eicar') && 'EICAR rejection (use --eicar)', !process.argv.includes('--mysql') && 'Direct MySQL integration (use --mysql)', 'Browser/Playwright usability and responsive tests'].filter(Boolean) };
+  const report = { status: 'passed', completedAt: new Date().toISOString(), elapsedMs: Date.now() - started, checks, notExecuted: [!process.argv.includes('--mysql') && 'Direct MySQL integration (use --mysql)', 'Browser/Playwright usability and responsive tests'].filter(Boolean) };
   const reportPath = path.join(root, 'test-results', 'integration-smoke.json');
   await mkdir(path.dirname(reportPath), { recursive: true });
   await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`, { mode: 0o600 });

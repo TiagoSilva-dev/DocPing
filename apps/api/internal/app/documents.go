@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"log"
 	"mime"
 	"net/http"
 	"path/filepath"
@@ -17,6 +18,19 @@ import (
 	"unicode"
 )
 
+// readableFile is the single rule for "this file may be opened, reviewed or
+// analysed". Uploads are no longer scanned for malware, so what qualifies is a
+// status this product writes: "unscanned" today, "clean" or
+// "unscanned_development" from the uploads stored while the scanner existed, or
+// a seeded sample. It stays an allow-list on purpose, so no quarantine value a
+// stored row might still carry can ever read as readable.
+func (a *App) readableFile(f domain.DocumentFile) bool {
+	switch f.ScanStatus {
+	case domain.ScanUnscanned, "clean", "unscanned_development":
+		return true
+	}
+	return f.Sample
+}
 func safeFilename(v string) string {
 	v = strings.ReplaceAll(v, "\\", "/")
 	v = filepath.Base(v)
@@ -35,6 +49,12 @@ func safeFilename(v string) string {
 	}
 	return v
 }
+
+// heifBrands lists the ISO-BMFF brands an iPhone writes for a still photo or a
+// photo burst. Only accepting "heic" rejected pictures taken by recent iOS
+// versions, which stamp "mif1" or "msf1" as the major brand.
+var heifBrands = map[string]bool{"heic": true, "heix": true, "heim": true, "heis": true, "hevc": true, "hevx": true, "hevm": true, "hevs": true, "mif1": true, "msf1": true}
+
 func detectFile(name string, data []byte) (string, error) {
 	kind := http.DetectContentType(data)
 	ext := strings.ToLower(filepath.Ext(name))
@@ -47,12 +67,9 @@ func detectFile(name string, data []byte) (string, error) {
 	case "image/png":
 		valid = ext == ".png"
 	}
-	if len(data) >= 12 && string(data[4:8]) == "ftyp" {
-		brand := string(data[8:12])
-		if brand == "heic" || brand == "heix" || brand == "hevc" || brand == "hevx" {
-			kind = "image/heic"
-			valid = ext == ".heic"
-		}
+	if len(data) >= 12 && string(data[4:8]) == "ftyp" && heifBrands[string(data[8:12])] {
+		kind = "image/heic"
+		valid = ext == ".heic"
 	}
 	if !valid {
 		return "", invalid("Envie um PDF, JPG, PNG ou HEIC com extensão e conteúdo válidos.")
@@ -60,9 +77,9 @@ func detectFile(name string, data []byte) (string, error) {
 	return kind, nil
 }
 
-// Reading the mobile connection, malware scanning and object I/O deliberately
-// happen outside the transaction. Commit rechecks identity, state, duplicates
-// and quotas so revocation/review during transfer cannot bypass authorization.
+// Reading the mobile connection and object I/O deliberately happen outside the
+// transaction. Commit rechecks identity, state, duplicates and quotas so
+// revocation/review during transfer cannot bypass authorization.
 func (a *App) uploadHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
 	defer cancel()
@@ -120,19 +137,18 @@ func (a *App) uploadHTTP(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	scan, err := a.Objects.Scan(ctx, data)
-	if err != nil {
-		status, code := 503, "scan_failed"
-		if scan == "rejected" {
-			status, code = 422, "malware_rejected"
-		}
-		writeError(w, fail(status, code, err.Error()))
-		return
-	}
 	sum := sha256.Sum256(data)
-	prepared := domain.DocumentFile{ID: domain.ID(), Name: name, MIMEType: kind, Size: int64(len(data)), CreatedAt: domain.Now(), ScanStatus: scan, SHA256: hex.EncodeToString(sum[:])}
+	prepared := domain.DocumentFile{ID: domain.ID(), Name: name, MIMEType: kind, Size: int64(len(data)), CreatedAt: domain.Now(), ScanStatus: domain.ScanUnscanned, SHA256: hex.EncodeToString(sum[:])}
 	prepared.ObjectKey = initial.OrgID + "/" + initial.ID + "/" + prepared.ID
+	if a.Config.AIReview {
+		prepared.Analysis = &domain.Analysis{Status: "queued", RequestedAt: domain.Now()}
+	}
 	if err = a.Objects.Put(ctx, prepared.ObjectKey, kind, data); err != nil {
+		// The client is told only that the upload failed, but the operator needs
+		// the provider's reason: a bucket that does not confirm the required
+		// SSE-S3 encryption fails here and is otherwise indistinguishable from
+		// an outage.
+		log.Print("object storage rejected an upload: ", err)
 		writeError(w, fail(503, "storage_unavailable", "Não foi possível salvar o arquivo. Tente novamente."))
 		return
 	}
@@ -152,6 +168,9 @@ func (a *App) uploadHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, err)
 		return
+	}
+	if consumed {
+		a.enqueueAnalysis(analysisJob{OrgID: initial.OrgID, RequestID: initial.ID, ItemID: r.PathValue("itemID"), FileID: prepared.ID})
 	}
 	writeJSON(w, 200, result)
 }
@@ -184,7 +203,7 @@ func (a *App) commitUpload(c *call, prepared domain.DocumentFile, consumed *bool
 		if !f.Superseded {
 			active++
 			if f.SHA256 == digest && item.Status != "correction_required" {
-				return domain.PublicRequest(r), nil
+				return domain.PortalRequest(r), nil
 			}
 		}
 	}
@@ -208,6 +227,12 @@ func (a *App) commitUpload(c *call, prepared domain.DocumentFile, consumed *bool
 	orgLimit, requestLimit := a.Config.MaxOrgBytes, a.Config.MaxRequestBytes
 	if orgLimit == 0 {
 		orgLimit = 1 << 30
+	}
+	// The plan's storage, when it has one of its own, applies on top of the
+	// deployment ceiling -- never above it. A plan sold with more space than
+	// the installation can hold would be a promise the server cannot keep.
+	if planBytes := c.S.Organizations[r.OrgID].Entitlement().StorageBytes; planBytes > 0 && planBytes < orgLimit {
+		orgLimit = planBytes
 	}
 	if requestLimit == 0 {
 		requestLimit = 500 << 20
@@ -244,7 +269,7 @@ func (a *App) commitUpload(c *call, prepared domain.DocumentFile, consumed *bool
 	domain.Recalculate(&r)
 	c.S.Requests[r.ID] = r
 	c.S.Audit(r.OrgID, "", "document.uploaded", f.ID)
-	return domain.PublicRequest(r), nil
+	return domain.PortalRequest(r), nil
 }
 func (a *App) authorizedFile(ctx context.Context, r *http.Request) (domain.DocumentFile, error) {
 	var found domain.DocumentFile
@@ -271,7 +296,7 @@ func (a *App) authorizedFile(ctx context.Context, r *http.Request) (domain.Docum
 			for _, item := range req.Items {
 				for _, f := range item.Files {
 					if f.ID == r.PathValue("id") {
-						if f.ScanStatus != "clean" && !f.Sample && !(a.Config.Env == "development" && f.ScanStatus == "unscanned_development") {
+						if !a.readableFile(f) {
 							return fail(423, "file_quarantined", "Arquivo indisponível para download.")
 						}
 						found = f
@@ -341,7 +366,7 @@ func (a *App) export(w http.ResponseWriter, r *http.Request) {
 	}()
 	for _, item := range req.Items {
 		for _, f := range item.Files {
-			if f.Superseded || !(f.ScanStatus == "clean" || f.Sample || a.Config.Env == "development" && f.ScanStatus == "unscanned_development") {
+			if f.Superseded || !a.readableFile(f) {
 				continue
 			}
 			var reader io.ReadCloser

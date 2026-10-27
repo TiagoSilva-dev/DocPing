@@ -213,6 +213,38 @@
 .review-layout {
   grid-template-columns: 275px minmax(0, 1fr);
 }
+/* The wait between Checkout returning and the webhook landing. It is a whole
+   screen because it is the one moment the customer has paid and the product
+   still cannot open. */
+.confirming-payment {
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 18px;
+  padding: 35px;
+  text-align: center;
+}
+.confirming-payment > h1 {
+  font-size: 22px;
+  letter-spacing: -0.5px;
+  margin: 0;
+}
+.confirming-payment > p {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--muted);
+  max-width: 52ch;
+  margin: 0;
+}
+.confirming-payment > .confirming-slow {
+  color: var(--text-primary);
+  background: var(--info-soft);
+  border: 1px solid var(--info-border);
+  border-radius: var(--radius);
+  padding: 11px 14px;
+}
 .not-found-page {
   min-height: 100dvh;
   display: flex;
@@ -226,7 +258,7 @@
 .not-found-page > .mono {
   font-size: 90px;
   line-height: 1;
-  color: #d4dfc8;
+  color: #dbdbdb;
 }
 .not-found-page > h1 {
   font-size: 28px;
@@ -534,10 +566,10 @@
   align-items: center;
   gap: 12px;
   padding: 14px 16px;
-  border: 1px solid #e8dfc6;
+  border: 1px solid #e1e1e1;
   border-radius: 8px;
-  background: #fbf7e9;
-  color: #826b42;
+  background: #f8f8f8;
+  color: #626262;
   margin-bottom: 22px;
 }
 .communication-alert > div {
@@ -552,7 +584,7 @@
 }
 .communication-alert span {
   font-size: 11px;
-  color: #88734e;
+  color: #6b6b6b;
 }
 .communication-alert button {
   display: flex;
@@ -562,7 +594,7 @@
   font-size: 11px;
   border: 0;
   background: transparent;
-  color: #7b6540;
+  color: #5c5c5c;
 }
 .communication-history-link {
   display: flex;
@@ -573,13 +605,13 @@
   padding: 14px 10px;
   border: 0;
   border-top: 1px solid var(--border);
-  background: #fbfcf8;
+  background: #fbfbfb;
   border-radius: 0 0 6px 6px;
   font-size: 11px;
-  color: #587448;
+  color: #5c5c5c;
 }
 .communication-history-link:hover {
-  background: #f0f5e9;
+  background: #f3f3f3;
 }
 @media (max-width: 700px) {
   .communication-alert {

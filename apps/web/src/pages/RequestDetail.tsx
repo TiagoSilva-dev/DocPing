@@ -25,6 +25,7 @@ import {
   X,
 } from "lucide-react";
 import { api, post } from "@/lib/api";
+import { usePageMeta } from "@/lib/seo";
 import type {
   Client,
   DocumentRequest,
@@ -33,6 +34,7 @@ import type {
 } from "@/lib/types";
 import { useToast } from "@/lib/toast";
 import { useSession } from "@/lib/session";
+import { AnalysisPanel } from "@/components/AnalysisPanel";
 import {
   Avatar,
   Button,
@@ -51,6 +53,7 @@ import {
 import "./request-flow.css";
 
 export function RequestDetail() {
+  usePageMeta({ title: "Solicitação — DocPing" });
   const { id = "" } = useParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -78,6 +81,16 @@ export function RequestDetail() {
   const file =
     (history ? selected?.files : activeFiles)?.find((f) => f.id === fileId) ||
     activeFiles[activeFiles.length - 1];
+  const analysis = file?.analysis;
+  const analyze = useMutation({
+    mutationFn: () =>
+      post<DocumentRequest>(`/requests/${id}/items/${selected!.id}/analyze`),
+    onSuccess: (updated) => {
+      queryClient.setQueryData(["request", id], updated);
+      toast("Análise solicitada. O resultado aparece aqui em instantes.");
+    },
+    onError: (e) => toast(e.message, "error"),
+  });
   const review = useMutation({
     mutationFn: (action: "approve" | "correct") =>
       post<DocumentRequest>(`/requests/${id}/items/${selected!.id}/review`, {
@@ -386,12 +399,20 @@ export function RequestDetail() {
                       <ExternalLink size={14} />
                     </a>
                   </div>
-                  {(file.sample ||
-                    file.scanStatus === "unscanned_development") && (
+                  {analysis && (
+                    <AnalysisPanel
+                      analysis={analysis}
+                      retrying={analyze.isPending}
+                      onRetry={
+                        selected.status === "uploaded"
+                          ? () => analyze.mutate()
+                          : undefined
+                      }
+                    />
+                  )}
+                  {file.sample && (
                     <div className="sample-file-note">
-                      {file.sample
-                        ? "Documento fictício para explorar a demonstração."
-                        : "Ambiente local: este arquivo ainda não passou por verificação antivírus."}
+                      Documento fictício para explorar a demonstração.
                     </div>
                   )}
                 </>
@@ -415,14 +436,22 @@ export function RequestDetail() {
                 <div className="review-actionbar">
                   <span>
                     <span className="review-ready-dot" />
-                    Pronto para sua revisão
+                    {analysis?.verdict === "approved"
+                      ? "A análise sugere aprovar"
+                      : analysis?.verdict === "rejected"
+                        ? "A análise sugere solicitar correção"
+                        : "Pronto para sua revisão"}
                   </span>
                   <div>
                     <Button
                       variant="secondary"
                       disabled={review.isPending}
                       onClick={() => {
-                        setReason("");
+                        setReason(
+                          analysis?.verdict === "rejected"
+                            ? analysis.reason || ""
+                            : "",
+                        );
                         setCorrecting(true);
                       }}
                     >
@@ -473,9 +502,11 @@ export function RequestDetail() {
                   {entry.reason && <span>{entry.reason}</span>}
                   <small>
                     {dateLabel(entry.createdAt)} ·{" "}
-                    {entry.userId === session.user.id
-                      ? session.user.name
-                      : "Equipe do escritório"}
+                    {entry.source === "jev"
+                      ? "Análise automática (Jev)"
+                      : entry.userId === session.user.id
+                        ? session.user.name
+                        : "Equipe do escritório"}
                   </small>
                 </p>
               </div>
@@ -497,6 +528,9 @@ export function RequestDetail() {
             <div className="correction-examples">
               <span>Sugestões para facilitar</span>
               {[
+                ...(analysis?.verdict === "rejected" && analysis.reason
+                  ? [analysis.reason]
+                  : []),
                 "A imagem está cortada. Envie uma nova foto mostrando o documento inteiro.",
                 "O arquivo está ilegível. Tente fotografar em um ambiente mais iluminado.",
                 "O documento não corresponde à competência solicitada.",

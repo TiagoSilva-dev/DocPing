@@ -57,8 +57,8 @@ export function Logo({
           cx="24"
           cy="24"
           r="5.5"
-          fill="#83B694"
-          stroke="var(--bg,#F8F9F6)"
+          fill="var(--accent,#4f46e5)"
+          stroke="var(--bg,#fafafa)"
           strokeWidth="2.5"
         />
       </svg>

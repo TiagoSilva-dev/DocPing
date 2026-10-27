@@ -12,19 +12,18 @@ flowchart LR
   P[Portal mobile • link temporário] -->|REST + token limitado| A
   A --> D[(MySQL 8 • metadados)]
   A --> S[(S3 privado • arquivos)]
-  A --> V[ClamAV • varredura]
   A --> M[SMTP • e-mail]
   J[Jobs internos • recorrência e lembretes] --> A
 ```
 
 - `apps/web`: UI, layouts, páginas/fluxos, cliente HTTP, schemas, estilos e tokens.
 - `apps/api`: auth, organizações, clientes, modelos, solicitações, documentos, recorrência e comunicações, com regras validadas no servidor.
-- `infra`: execução local e imagens auxiliares. Compose inclui API, MySQL, MinIO, Mailpit e ClamAV.
+- `infra`: execução local e imagens auxiliares. Compose inclui API, MySQL, MinIO e Mailpit.
 - `docs`: produto, contratos, decisões e critérios de aceite.
 
 **Duas configurações explícitas:** `STORE_DRIVER=mysql` é o caminho de produção; `STORE_DRIVER=json` e arquivos privados locais existem somente para desenvolvimento sem Docker. Falha de MySQL não pode ativar JSON automaticamente. JSON não é validação de transações, concorrência SQL ou isolamento do banco em produção.
 
-**Arquivos fora do MySQL:** o banco guarda chave opaca, hash, tamanho, MIME, versão e resultado de varredura; os bytes ficam no storage privado. API autoriza o acesso antes de transmitir conteúdo ou emitir URL curta. Não retornar credenciais do bucket nem tornar objetos públicos. O cliente não escolhe caminho físico. Upload não verificado não pode ser apresentado como limpo.
+**Arquivos fora do MySQL:** o banco guarda chave opaca, hash, tamanho, MIME, versão e o campo `scanStatus`; os bytes ficam no storage privado. API autoriza o acesso antes de transmitir conteúdo ou emitir URL curta. Não retornar credenciais do bucket nem tornar objetos públicos. O cliente não escolhe caminho físico. **Não há varredura antivírus** — o ClamAV foi removido por custo de infraestrutura e todo upload é gravado como `unscanned`; nenhuma tela, documento ou material de venda pode apresentar o arquivo como verificado.
 
 **Comunicação verdadeira:** `accepted` significa aceito pelo SMTP/provedor; `delivered` exige evento próprio do provedor, indisponível em SMTP simples. Abrir WhatsApp é `manual_opened`, sem confirmação de envio. Rejeição/indisponibilidade fica visível e permite repetir com deduplicação.
 
@@ -58,13 +57,15 @@ Nomes físicos e detalhes finais devem acompanhar as migrações versionadas em 
 
 **Desvio conhecido da fundação implementada:** a persistência atual combina colunas relacionais de propriedade, busca e unicidade com agregados/snapshots em `payload JSON`; o processo carrega o estado para executar operações. Não é ainda a normalização completa da tabela de referência, nem uma estratégia adequada para escalar escritórios e documentos sem limite. Antes de crescimento comercial, migrar atributos consultáveis para colunas, executar consultas SQL com escopo por organização e eliminar leituras/regravações globais de estado. O modo JSON local tem a mesma finalidade de desenvolvimento, sem substituir validação MySQL real.
 
-**Concorrência:** o armazenamento serializa transações curtas com mutex do processo e lock global de escrita. A leitura do upload, varredura e acesso ao objeto foram separados da transação; o commit revalida identidade, estado, duplicidade e quota, e limpa objetos não vinculados em caso de falha. SMTP executa após persistir a tentativa `pending`; depois registra `accepted` ou `failed`. Testes locais com upload/SMTP bloqueados verificaram que outra operação continua e que revogação durante upload impede o commit. Isso não substitui teste de carga com MySQL e storage reais.
+**Exclusão:** `save` só faz upsert — retirar uma entidade do estado em memória é invisível para o MySQL e a próxima leitura a traria de volta. Apagar de verdade exige `DELETE`, e por isso a exclusão não passa por `Run`: `Store.PurgeOrganizations` remove a organização e tudo o que ela possui em ordem filho-primeiro, porque o schema não declara `ON DELETE CASCADE` e uma tabela-pai apagada antes é recusada pela chave estrangeira. É o único caminho de exclusão hoje, usado pelo job que expira demonstrações e cadastros não confirmados. Os objetos no bucket são responsabilidade de quem chama, antes da remoção do estado.
+
+**Concorrência:** o armazenamento serializa transações curtas com mutex do processo e lock global de escrita. A leitura do upload e o acesso ao objeto foram separados da transação; o commit revalida identidade, estado, duplicidade e quota, e limpa objetos não vinculados em caso de falha. SMTP executa após persistir a tentativa `pending`; depois registra `accepted` ou `failed`. Testes locais com upload/SMTP bloqueados verificaram que outra operação continua e que revogação durante upload impede o commit. Isso não substitui teste de carga com MySQL e storage reais.
 
 `tax_id` é texto, nunca inteiro. Novas inscrições brasileiras podem ter CNPJ alfanumérico: preservar letras maiúsculas e normalizar apenas pontuação; não usar uma máscara que apague letras. Cadastro manual não depende de consulta externa à Receita. [Receita Federal, consulta em 19/10/2026](https://www.gov.br/receitafederal/pt-br/assuntos/noticias/2026/julho/antecipacao-de-atividades-para-implantacao-do-cnpj-alfanumerico).
 
 ## Transações e concorrência
 
-Criar solicitação, copiar itens e emitir acesso é uma unidade transacional. Aprovação/correção deve verificar organização, papel, arquivo atual, resultado de varredura e estado do item; recalcular progresso e conclusão na mesma transação. Uma atualização concorrente deve retornar conflito ou ser serializada, sem perder auditoria.
+Criar solicitação, copiar itens e emitir acesso é uma unidade transacional. Aprovação/correção deve verificar organização, papel, arquivo atual, legibilidade do arquivo (`readableFile`) e estado do item; recalcular progresso e conclusão na mesma transação. Uma atualização concorrente deve retornar conflito ou ser serializada, sem perder auditoria.
 
 Job mensal usa chave única regra+cliente+competência. Lock do job é uma otimização; a restrição continua protegendo a integridade. Reexecutar depois de falha cria somente os clientes faltantes. Lembretes precisam reservar uma entrega com chave única antes do envio; SMTP não garante exatamente uma entrega em toda falha de rede, portanto registrar resultado incerto e evitar promessa de entrega única absoluta.
 
@@ -91,3 +92,19 @@ Quarentena é estado do **arquivo**, separado do item: recebido, em verificaçã
 | cancelled | Cancelada | Não aceita uploads nem novos lembretes |
 
 `Atrasada` é um filtro derivado de prazo vencido e estado ativo, não um segundo estado persistido. Concluída/cancelada não recebe upload; reabrir exige autorização explícita e auditoria. Toda transição deve ser validada pela API, mesmo se a interface ocultar a ação.
+
+## Análise automática de documentos (Docling + PaddleOCR + Jev)
+
+Decisão: manter o monólito. A análise não introduz microserviço, Redis nem fila externa. A fila é um canal em memória do próprio binário, com dois workers, e os serviços de extração são containers no mesmo Compose, sob o perfil `ai`, porque baixam modelos pesados.
+
+O recurso é desligado por padrão (`AI_REVIEW_ENABLED`). Sem ele nada muda: todo upload continua indo para revisão humana.
+
+**Fronteira transacional.** A análise respeita a regra que já vale para SMTP e storage: nenhum I/O externo dentro da transação. O upload confirma o arquivo e grava `analysis.status=queued` no mesmo commit; o enfileiramento ocorre depois. O worker lê o estado, baixa o objeto, chama Docling/PaddleOCR e Jev fora de qualquer transação, e só então abre uma transação de escrita para gravar o veredito. O e-mail de correção, quando o veredito é aplicado, é efeito pós-commit.
+
+**Quem decide.** O modelo responde seis julgamentos tipados e independentes sobre o mesmo estado, numa única chamada. A composição do veredito é código (`internal/analysis/review.go`), com limiares em configuração. Isso mantém a política auditável, permite mudar limiar sem nova inferência, e garante que resposta faltante, serviço indisponível ou probabilidade próxima de 0,5 caiam sempre em revisão humana — nunca em aprovação.
+
+**Reentrância.** O worker pode terminar minutos depois do upload. Tudo é revalidado na transação de escrita: solicitação encerrada, item já revisado por uma pessoa, arquivo substituído. Uma decisão humana sempre prevalece; o veredito tardio fica apenas registrado com `applied:false`.
+
+**Privacidade.** `domain.PortalRequest` remove a análise e o `userId` das revisões antes de qualquer resposta ao cliente. O cliente lê o motivo da correção; nunca os sinais, as notas ou quem decidiu. O texto extraído não é persistido — apenas a contagem de caracteres, o veredito e os sinais.
+
+**Desvio conhecido.** Os limiares padrão são ponto de partida e precisam ser calibrados nos documentos do próprio escritório antes de confiar no modo automático. A fila é volátil: um reinício perde jobs enfileirados e o item permanece `uploaded`, visível para revisão. O julgamento é sobre o texto extraído, não sobre a imagem: assinatura, carimbo e adulteração visual não são verificados.
