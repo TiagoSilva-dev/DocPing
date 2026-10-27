@@ -89,3 +89,59 @@ Nada aqui foi verificado em produção. Em ordem:
    no domínio real.
 4. Validar os dados estruturados no Rich Results Test.
 5. Conferir a prévia social (OG/Twitter) de `https://docping.com.br/`.
+
+## Páginas legais, medição e Google Ads
+
+O Google Ads recusa anunciante sem política de privacidade, sem termos e sem
+contato acessível na própria landing. As três coisas passam a existir:
+
+- `/privacidade` e `/termos` (`apps/web/src/pages/Legal.tsx`), indexáveis, no
+  `sitemap.xml`, linkadas no rodapé da landing e uma na outra.
+- Rodapé com e-mail de contato, e-mail de suporte/LGPD e, quando
+  `VITE_MEETING_URL` está definida, link de agenda. Sem a variável o rodapé
+  oferece apenas e-mail — nunca um botão morto.
+- Identificação do controlador (razão social, CNPJ, endereço) vinda de
+  `VITE_COMPANY_*`. Enquanto estiverem vazias o bloco é omitido em vez de
+  imprimir texto genérico. **Preencher antes de subir campanha:** sem CNPJ o
+  anunciante não é identificável, e a verificação do Google pede isso.
+
+### Medição
+
+`apps/web/src/lib/consent.ts` é a única porta. Nada do Google é carregado antes
+do aceite: nem o `gtag.js`, nem cookie, nem requisição. Isso é mais rígido que
+o Consent Mode sozinho, onde a tag carrega negada e ainda assim fala com o
+Google, e é a única versão que a política de privacidade consegue descrever
+honestamente. Recusar é um clique do mesmo tamanho que aceitar, e o site
+funciona igual nos dois casos.
+
+Sem `VITE_GA4_ID` e sem `VITE_GOOGLE_ADS_ID` não há tag e o aviso de cookies
+não aparece — não existe com o que consentir. As variáveis são `ARG` no
+`apps/web/Dockerfile` porque o Vite as grava no bundle: trocar uma exige
+rebuild da imagem.
+
+A conversão de cadastro dispara em `AuthPages` quando o registro é aceito
+(inclusive no caminho `verification_sent`, que é o normal em produção): evento
+`sign_up` no GA4 e, se `VITE_ADS_SIGNUP_LABEL` existir, `conversion` no Ads.
+Navegação de SPA reporta `page_view` por rota — sem isso só a landing seria
+contada.
+
+O portal do cliente não recebe nenhuma tag de medição ou publicidade.
+
+### Preço na vitrine
+
+O título dos planos diz o preço do plano mais barato realmente à venda
+(R$ 67). Anúncio e landing precisam dizer a mesma coisa, e o Google compara.
+O selo do plano em destaque diz "Nossa recomendação": "Mais escolhido" é uma
+afirmação sobre a escolha de outras pessoas, e não temos esse dado.
+
+### Pendências de Ads
+
+1. Criar a propriedade GA4 e a conta do Google Ads; preencher as `VITE_*`.
+2. Definir a ação de conversão no Ads e colar o rótulo em
+   `VITE_ADS_SIGNUP_LABEL`.
+3. Preencher `VITE_COMPANY_LEGAL_NAME`, `VITE_COMPANY_TAX_ID` e
+   `VITE_COMPANY_ADDRESS`.
+4. Criar as caixas `contato@` e `suporte@` — as duas estão publicadas nas
+   páginas legais e precisam responder.
+5. Revisão jurídica das duas páginas antes da campanha. O texto foi escrito
+   contra o produto que existe, não por advogado.

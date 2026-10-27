@@ -6,6 +6,7 @@ import {
   ArrowRight,
   BrainCircuit,
   Building2,
+  CalendarClock,
   Check,
   ChevronDown,
   CircleCheck,
@@ -16,8 +17,10 @@ import {
   FileUp,
   KeyRound,
   Layers,
+  LifeBuoy,
   Link2,
   Lock,
+  Mail,
   Repeat2,
   ScanText,
   Scale,
@@ -27,6 +30,13 @@ import {
   X,
 } from "lucide-react";
 import { Button, Logo } from "@/components/shared";
+import {
+  COMPANY_LEGAL_NAME,
+  COMPANY_TAX_ID,
+  CONTACT_EMAIL,
+  MEETING_URL,
+  SUPPORT_EMAIL,
+} from "@/lib/site";
 import { post } from "@/lib/api";
 import { PLANS as plans } from "@/lib/plans";
 import {
@@ -88,16 +98,37 @@ const criteria = [
   ["Competência", "O período do documento é o da solicitação."],
   ["Integridade", "Está completo, sem páginas faltando ou conteúdo cortado."],
   ["Legibilidade", "Dá para ler — inclusive em foto tirada pelo celular."],
-  ["Impedimentos", "Documento vencido, rasurado ou com indício de adulteração."],
+  [
+    "Impedimentos",
+    "Documento vencido, rasurado ou com indício de adulteração.",
+  ],
 ];
 
 const comparison = [
-  ["Cobrar cliente por cliente, à mão", "Lembretes automáticos por e-mail, no ritmo que você definir"],
-  ["Arquivo perdido no meio da conversa", "Cada arquivo preso ao item que foi pedido"],
-  ["Conferir tudo na unha, documento por documento", "Análise automática com os seis critérios já verificados"],
-  ["Descobrir o documento errado no fechamento", "Documento fora do padrão devolvido na hora do envio"],
-  ["Montar pasta e renomear arquivo", "Exportação em ZIP, organizada, a um clique"],
-  ["Não saber quem aprovou o quê", "Histórico com autor, motivo e data em cada decisão"],
+  [
+    "Cobrar cliente por cliente, à mão",
+    "Lembretes automáticos por e-mail, no ritmo que você definir",
+  ],
+  [
+    "Arquivo perdido no meio da conversa",
+    "Cada arquivo preso ao item que foi pedido",
+  ],
+  [
+    "Conferir tudo na unha, documento por documento",
+    "Análise automática com os seis critérios já verificados",
+  ],
+  [
+    "Descobrir o documento errado no fechamento",
+    "Documento fora do padrão devolvido na hora do envio",
+  ],
+  [
+    "Montar pasta e renomear arquivo",
+    "Exportação em ZIP, organizada, a um clique",
+  ],
+  [
+    "Não saber quem aprovou o quê",
+    "Histórico com autor, motivo e data em cada decisão",
+  ],
 ];
 
 export function Landing() {
@@ -359,7 +390,10 @@ export function Landing() {
                 Você vê o porquê, não só o resultado.
               </p>
             </div>
-            <div className="lp-pipeline" aria-label="Etapas da análise automática">
+            <div
+              className="lp-pipeline"
+              aria-label="Etapas da análise automática"
+            >
               <div className="lp-pipe-step">
                 <FileUp size={21} strokeWidth={1.3} />
                 <h3>Upload do documento</h3>
@@ -371,7 +405,9 @@ export function Landing() {
               <div className="lp-pipe-step">
                 <ScanText size={21} strokeWidth={1.3} />
                 <h3>Extração de informações</h3>
-                <p>Leitura da estrutura do PDF e OCR para documento digitalizado</p>
+                <p>
+                  Leitura da estrutura do PDF e OCR para documento digitalizado
+                </p>
               </div>
               <span className="lp-pipe-arrow" aria-hidden="true">
                 <ArrowDown size={15} />
@@ -379,7 +415,9 @@ export function Landing() {
               <div className="lp-pipe-step lp-pipe-highlight">
                 <BrainCircuit size={21} strokeWidth={1.3} />
                 <h3>Análise de conformidade</h3>
-                <p>Seis critérios julgados em separado, cada um com sua confiança</p>
+                <p>
+                  Seis critérios julgados em separado, cada um com sua confiança
+                </p>
               </div>
               <span className="lp-pipe-arrow" aria-hidden="true">
                 <ArrowDown size={15} />
@@ -646,7 +684,7 @@ export function Landing() {
           <div className="lp-section-heading">
             <span className="lp-eyebrow">PLANOS</span>
             <h2>
-              A partir de R$ 97 por mês.
+              A partir de R$ 67 por mês.
               <br />
               <span>Com a análise já inclusa.</span>
             </h2>
@@ -662,7 +700,7 @@ export function Landing() {
                 key={plan.id}
               >
                 {plan.featured && (
-                  <span className="lp-plan-tag">Mais escolhido</span>
+                  <span className="lp-plan-tag">Nossa recomendação</span>
                 )}
                 <h3>{plan.name}</h3>
                 <p className="lp-plan-pitch">{plan.pitch}</p>
@@ -736,14 +774,46 @@ export function Landing() {
         </section>
       </main>
       <footer className="lp-footer lp-container">
-        <Link to="/" className="lp-logo" aria-label="DocPing — início">
-          <Logo small />
-        </Link>
-        <p>Simples na utilização. Cuidadoso em cada detalhe.</p>
-        <Link to="/entrar">
-          Acessar meu escritório
-          <ArrowRight size={13} />
-        </Link>
+        <div className="lp-footer-brand">
+          <Link to="/" className="lp-logo" aria-label="DocPing — início">
+            <Logo small />
+          </Link>
+          <p>Simples na utilização. Cuidadoso em cada detalhe.</p>
+          {(COMPANY_LEGAL_NAME || COMPANY_TAX_ID) && (
+            <p className="lp-footer-legal-id">
+              {COMPANY_LEGAL_NAME}
+              {COMPANY_TAX_ID && <> — CNPJ {COMPANY_TAX_ID}</>}
+            </p>
+          )}
+        </div>
+        <div className="lp-footer-col">
+          <h2>Fale com a gente</h2>
+          <a href={`mailto:${CONTACT_EMAIL}`}>
+            <Mail size={13} />
+            {CONTACT_EMAIL}
+          </a>
+          {MEETING_URL && (
+            <a href={MEETING_URL} target="_blank" rel="noopener noreferrer">
+              <CalendarClock size={13} />
+              Agendar uma conversa
+            </a>
+          )}
+          <a href={`mailto:${SUPPORT_EMAIL}`}>
+            <LifeBuoy size={13} />
+            Suporte e LGPD
+          </a>
+        </div>
+        <div className="lp-footer-col">
+          <h2>DocPing</h2>
+          <Link to="/entrar">Acessar meu escritório</Link>
+          <Link to="/cadastro">Criar meu escritório</Link>
+          <a href="#precos">Planos e preços</a>
+        </div>
+        <div className="lp-footer-col">
+          <h2>Legal</h2>
+          <Link to="/privacidade">Política de Privacidade</Link>
+          <Link to="/termos">Termos de Uso</Link>
+        </div>
       </footer>
     </div>
   );

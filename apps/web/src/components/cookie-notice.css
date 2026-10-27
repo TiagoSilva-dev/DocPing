@@ -1,0 +1,78 @@
+.ck {
+  position: fixed;
+  z-index: 60;
+  inset-inline: 16px;
+  bottom: 16px;
+  margin-inline: auto;
+  max-width: 680px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: 0 14px 40px #1414141f;
+}
+.ck-body {
+  display: flex;
+  gap: 11px;
+  align-items: flex-start;
+  flex: 1 1 320px;
+  color: var(--text-secondary);
+}
+.ck-body svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--text-primary);
+}
+.ck-body p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+}
+.ck-body a {
+  color: var(--text-primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.ck-actions {
+  display: flex;
+  gap: 8px;
+  flex: none;
+}
+.ck-actions button {
+  cursor: pointer;
+  padding: 9px 18px;
+  border-radius: 7px;
+  font-size: 13px;
+  font-weight: 500;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-primary);
+}
+.ck-actions button:hover {
+  border-color: var(--border-hover);
+  background: var(--surface-hover);
+}
+.ck-grant {
+  border-color: var(--primary) !important;
+  background: var(--primary) !important;
+  color: #fff !important;
+}
+.ck-grant:hover {
+  opacity: 0.9;
+}
+@media (max-width: 520px) {
+  .ck {
+    gap: 12px;
+  }
+  .ck-actions {
+    width: 100%;
+  }
+  .ck-actions button {
+    flex: 1;
+  }
+}

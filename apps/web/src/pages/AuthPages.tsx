@@ -20,6 +20,7 @@ import { Button, Field, Logo } from "@/components/shared";
 import { Form, FormMessage } from "@/components/ui/form";
 import { ApiError, post } from "@/lib/api";
 import { usePageMeta } from "@/lib/seo";
+import { signup } from "@/lib/consent";
 import type { Session } from "@/lib/types";
 import "./auth-pages.css";
 
@@ -345,9 +346,11 @@ export function AuthPage({ register = false }: { register?: boolean }) {
       // Registration answers with the address it wrote to instead of a
       // session whenever confirmation is required.
       if ("status" in result && result.status === "verification_sent") {
+        if (register) signup();
         setAwaitingEmail(result.email);
         return;
       }
+      if (register) signup();
       enter(result as Session, register ? "/app/solicitacoes/nova" : "/app");
     } catch (error) {
       // Signing in before confirming is not a failed attempt to show as an

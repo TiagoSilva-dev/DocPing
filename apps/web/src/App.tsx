@@ -24,6 +24,8 @@ import { ToastProvider } from "@/lib/toast";
 import { Shell } from "@/components/Shell";
 import { usePageMeta } from "@/lib/seo";
 import { Button, Logo, Loading, ErrorState } from "@/components/shared";
+import { CookieNotice } from "@/components/CookieNotice";
+import { pageView } from "@/lib/consent";
 const Dashboard = lazy(() =>
   import("@/pages/Dashboard").then((m) => ({ default: m.Dashboard })),
 );
@@ -67,6 +69,22 @@ const ResetPasswordPage = lazy(() =>
 const Landing = lazy(() =>
   import("@/pages/Landing").then((m) => ({ default: m.Landing })),
 );
+const PrivacyPage = lazy(() =>
+  import("@/pages/Legal").then((m) => ({ default: m.PrivacyPage })),
+);
+const TermsPage = lazy(() =>
+  import("@/pages/Legal").then((m) => ({ default: m.TermsPage })),
+);
+// A single-page app loads the measurement tag once, so without this only the
+// first page of a visit would ever be counted. It reports nothing until the
+// visitor has accepted -- see lib/consent.ts.
+function Measurement() {
+  const { pathname } = useLocation();
+  useEffect(() => {
+    pageView(pathname);
+  }, [pathname]);
+  return null;
+}
 function ProtectedLayout() {
   const queryClient = useQueryClient();
   const location = useLocation();
@@ -150,9 +168,9 @@ function ConfirmingPayment() {
       </p>
       {slow && (
         <p className="confirming-slow">
-          Está demorando mais que o normal. Nada se perdeu: a confirmação
-          chega e o escritório abre sozinho. Se preferir, atualize a página em
-          alguns minutos.
+          Está demorando mais que o normal. Nada se perdeu: a confirmação chega
+          e o escritório abre sozinho. Se preferir, atualize a página em alguns
+          minutos.
         </p>
       )}
     </div>
@@ -178,6 +196,7 @@ export default function App() {
       <MotionConfig reducedMotion="user">
         <ToastProvider>
           <BrowserRouter>
+            <Measurement />
             <Suspense fallback={<Loading />}>
               <Routes>
                 <Route path="/" element={<Landing />} />
@@ -189,6 +208,8 @@ export default function App() {
                   element={<ResetPasswordPage />}
                 />
                 <Route path="/confirmar-email" element={<VerifyEmailPage />} />
+                <Route path="/privacidade" element={<PrivacyPage />} />
+                <Route path="/termos" element={<TermsPage />} />
                 <Route path="/assinar" element={<Subscribe />} />
                 <Route path="/p/:token" element={<PortalPage />} />
                 <Route path="/portal/:token" element={<PortalPage />} />
@@ -205,6 +226,7 @@ export default function App() {
                 <Route path="*" element={<NotFound />} />
               </Routes>
             </Suspense>
+            <CookieNotice />
           </BrowserRouter>
         </ToastProvider>
       </MotionConfig>

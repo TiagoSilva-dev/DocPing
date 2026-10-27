@@ -58,7 +58,8 @@ Nesse caso, não execute o Vite na mesma porta. Nesta máquina, o `.env` local u
 - Recorrências mensais idempotentes no fuso de São Paulo, último dia para meses curtos, snapshots, pausar/reativar e histórico de execução.
 - Lembretes configuráveis, registro de tentativas e falhas de comunicação visíveis no painel; exportação ZIP autorizada.
 - Análise automática opcional de cada arquivo: Docling extrai o texto (PaddleOCR cobre foto e digitalização sem camada de texto) e o modelo Jev julga seis critérios; o veredito é composto em código e pode aprovar, devolver com motivo ou escalar para revisão humana. Desligada por padrão e configurável por escritório.
-- Argon2id, sessões HttpOnly/SameSite/Secure em produção, CSRF, isolamento por escritório, tokens de alta entropia com hash, expiração, auditoria, limites e scanner que falha fechado.
+- Páginas públicas de [Política de Privacidade](https://docping.com.br/privacidade) e [Termos de Uso](https://docping.com.br/termos), rodapé com contato e aviso de cookies que não carrega nenhuma ferramenta de medição antes do aceite. Detalhes em [docs/08-seo.md](docs/08-seo.md).
+- Argon2id, sessões HttpOnly/SameSite/Secure em produção, CSRF, isolamento por escritório, tokens de alta entropia com hash, expiração, auditoria e limites. Não há varredura antivírus: o que barra um upload é o tipo conferido por conteúdo e extensão, o limite de tamanho, o bucket privado e a sessão.
 
 Preço e limite do plano não ficam em componentes. A cobrança do piloto é externa; não existe checkout simulado. A política de retenção pode ser registrada, mas não há rotina de eliminação automática pronta: isso está explicitado na interface e nos gates de lançamento.
 
