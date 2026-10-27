@@ -1408,3 +1408,41 @@
   gap: 10px;
   flex-wrap: wrap;
 }
+
+/* The channels a just-registered client can be charged through. Each line
+   pairs an icon with the address itself: the office has to see which contact
+   the message will actually reach before it agrees to send one. */
+.wp-chase-channels {
+  list-style: none;
+  margin: 0 0 4px;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+.wp-chase-channels li {
+  display: flex;
+  gap: 11px;
+  align-items: flex-start;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+.wp-chase-channels svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--text-secondary);
+}
+.wp-chase-channels strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+.wp-chase-channels span {
+  display: block;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  word-break: break-word;
+}

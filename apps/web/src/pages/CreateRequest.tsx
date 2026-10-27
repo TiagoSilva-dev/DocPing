@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
@@ -48,6 +48,11 @@ export function CreateRequest() {
   const toast = useToast();
   const [step, setStep] = useState(1);
   const [chosen, setChosen] = useState<string[]>([]);
+  // Arriving from a client that was just registered: that client is already
+  // the answer to step one, so the flow opens on the documents instead of
+  // asking the office to find in a list the name it typed a second ago.
+  const [searchParams] = useSearchParams();
+  const fromClient = searchParams.get("cliente");
   const [q, setQ] = useState("");
   const [adding, setAdding] = useState(false);
   const [templateId, setTemplateId] = useState("");
@@ -68,6 +73,10 @@ export function CreateRequest() {
   const [error, setError] = useState("");
   const [links, setLinks] = useState<Record<string, string>>({});
   const [sharing, setSharing] = useState("");
+  // Which requests already had their e-mail accepted by the provider, so the
+  // card says so instead of offering a send that the one-minute guard on the
+  // API would refuse anyway.
+  const [emailed, setEmailed] = useState<string[]>([]);
   const clientsQuery = useQuery({
     queryKey: ["clients"],
     queryFn: () => api<Client[]>("/clients"),
@@ -77,6 +86,21 @@ export function CreateRequest() {
     queryFn: () => api<Template[]>("/templates"),
   });
   const clients = clientsQuery.data || [];
+  // Only once, and only for a client that really belongs to this workspace
+  // and is active -- the id travels in the URL, so it is a request, not a
+  // fact. Going back to step one afterwards has to keep working, which is
+  // what the ref guards.
+  const jumped = useRef(false);
+  useEffect(() => {
+    if (jumped.current || !fromClient || clientsQuery.isLoading) return;
+    jumped.current = true;
+    const client = (clientsQuery.data || []).find(
+      (c) => c.id === fromClient && c.active,
+    );
+    if (!client) return;
+    setChosen([client.id]);
+    setStep(2);
+  }, [fromClient, clientsQuery.data, clientsQuery.isLoading]);
   // The list now carries archived models so they can be reactivated; only
   // active ones may start a new request.
   const templates = (templatesQuery.data || []).filter((t) => t.active);
@@ -106,6 +130,7 @@ export function CreateRequest() {
               throw new Error(
                 delivery.error || "O e-mail não foi aceito pelo provedor.",
               );
+            setEmailed((p) => [...p, r.id]);
             toast(`E-mail de ${r.clientName} aceito pelo provedor.`);
           } catch (e) {
             toast(
@@ -161,7 +186,18 @@ export function CreateRequest() {
         url = result.url;
         setLinks((p) => ({ ...p, [r.id]: url }));
       }
-      if (mode === "copy") {
+      if (mode === "email") {
+        const delivery = await post<{ status: string; error?: string }>(
+          `/requests/${r.id}/notify`,
+          { channel: "email" },
+        );
+        if (delivery.status !== "accepted")
+          throw new Error(
+            delivery.error || "O e-mail não foi aceito pelo provedor.",
+          );
+        setEmailed((p) => [...p, r.id]);
+        toast(`E-mail de ${r.clientName} aceito pelo provedor.`);
+      } else if (mode === "copy") {
         await navigator.clipboard.writeText(url);
         toast("Link copiado. Pronto para compartilhar.");
       } else if (mode === "portal") {
@@ -238,8 +274,24 @@ export function CreateRequest() {
                   <Copy size={14} />
                   Copiar link
                 </Button>
+                {emailed.includes(r.id) ? (
+                  <span className="created-sent">
+                    <Check size={13} />
+                    E-mail enviado
+                  </span>
+                ) : (
+                  <Button
+                    variant="secondary"
+                    disabled={!clients.find((c) => c.id === r.clientId)?.email}
+                    onClick={() => void share(r, "email")}
+                  >
+                    <Mail size={14} />
+                    Enviar e-mail
+                  </Button>
+                )}
                 <Button
                   variant="secondary"
+                  disabled={!clients.find((c) => c.id === r.clientId)?.phone}
                   onClick={() => void share(r, "whatsapp")}
                 >
                   <MessageCircle size={14} />

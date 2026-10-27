@@ -50,7 +50,7 @@ Nesse caso, não execute o Vite na mesma porta. Nesta máquina, o `.env` local u
 
 - Landing curta, login, criação do escritório, recuperação/redefinição de senha e onboarding dentro da primeira solicitação.
 - Central operacional, filtros por estado/competência, busca por cliente/CNPJ, progresso derivado dos documentos e prioridades de revisão/atraso.
-- Clientes com criação, edição, arquivamento, histórico e importação CSV com prévia, validação por linha e gravação atômica.
+- Clientes com criação, edição, arquivamento, histórico e importação CSV com prévia, validação por linha e gravação atômica. Cliente recém-cadastrado abre o convite de cobrança: o escritório decide ali se já monta a primeira solicitação e envia o link por e-mail e WhatsApp.
 - Modelos editáveis, ordenação de itens e cópia dos requisitos preservada em cada solicitação.
 - Criação individual ou em lote em três etapas; links temporários revogáveis; WhatsApp manual; tentativa SMTP com estado verdadeiro.
 - Portal sem cadastro, upload independente com progresso real, retry, deduplicação por conteúdo, foto/arquivo, retomada dos envios já salvos e código adicional para solicitações sensíveis.

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   Archive,
   ArrowDown,
@@ -14,6 +14,7 @@ import {
   FileText,
   History,
   Mail,
+  MessageCircle,
   Pause,
   Pencil,
   Play,
@@ -616,6 +617,83 @@ function ClientImport({
   );
 }
 
+// ChaseInvite is the step that turns a cadastro into a cobranca. Registering
+// a client accomplishes nothing by itself: what the office wants is the
+// documents, and the client cannot send anything until a solicitacao exists
+// and its link reaches them.
+//
+// It asks instead of acting. The first message a client ever receives from an
+// office carries that office's name, so what goes out and when is the
+// office's call -- and an automatic send here would also be the one e-mail
+// nobody consented to. Saying no costs one click and the invite never
+// returns for that client.
+function ChaseInvite({
+  client,
+  onClose,
+}: {
+  client: Client;
+  onClose: () => void;
+}) {
+  const navigate = useNavigate();
+  const reachable = Boolean(client.email || client.phone);
+  return (
+    <Modal
+      title="Cobrar os documentos agora?"
+      description={`${client.name} está cadastrado. Falta pedir o que você precisa.`}
+      onClose={onClose}
+    >
+      <p className="wp-dialog-copy">
+        Vamos montar a primeira solicitação a partir de um dos seus modelos e
+        gerar o link que <strong>{client.contactName || client.name}</strong>{" "}
+        usa para enviar os arquivos — sem criar conta e sem instalar nada.
+      </p>
+      {reachable ? (
+        <ul className="wp-chase-channels">
+          {client.email && (
+            <li>
+              <Mail size={15} />
+              <div>
+                <strong>E-mail</strong>
+                <span>{client.email}</span>
+              </div>
+            </li>
+          )}
+          {client.phone && (
+            <li>
+              <MessageCircle size={15} />
+              <div>
+                <strong>WhatsApp</strong>
+                <span>
+                  {client.phone} — abrimos a conversa com a mensagem pronta para
+                  você conferir e enviar
+                </span>
+              </div>
+            </li>
+          )}
+        </ul>
+      ) : (
+        <p className="wp-dialog-copy">
+          Este cliente não tem e-mail nem telefone cadastrado, então só o link
+          copiável fica disponível. Você pode adicionar um contato depois e
+          cobrar pelos dois canais.
+        </p>
+      )}
+      <div className="form-actions">
+        <Button variant="secondary" onClick={onClose}>
+          Depois
+        </Button>
+        <Button
+          onClick={() =>
+            navigate(`/app/solicitacoes/nova?cliente=${client.id}`)
+          }
+        >
+          Cobrar documentos
+          <ArrowRight size={15} />
+        </Button>
+      </div>
+    </Modal>
+  );
+}
 export function ClientsPage() {
   usePageMeta({ title: "Clientes — DocPing" });
   const query = useQuery({
@@ -635,11 +713,16 @@ export function ClientsPage() {
     }
   }, [searchParam]);
   const [editor, setEditor] = useState<Client | "new" | null>(null);
+  // A client that was just created and has nothing to send yet. Cadastrar is
+  // not the point -- being asked for the documents is -- so the moment the
+  // client exists we offer to charge for them, once, and never nag again.
+  const [chasing, setChasing] = useState<Client | null>(null);
   const [importing, setImporting] = useState(false);
   const [archiving, setArchiving] = useState<Client | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const toast = useToast();
   const clients = query.data ?? [];
   const filtered = clients.filter(
@@ -883,7 +966,13 @@ export function ClientsPage() {
         <ClientEditor
           client={editor === "new" ? null : editor}
           onClose={() => setEditor(null)}
+          onSaved={(saved) => {
+            if (editor === "new") setChasing(saved);
+          }}
         />
+      )}
+      {chasing && (
+        <ChaseInvite client={chasing} onClose={() => setChasing(null)} />
       )}
       {importing && (
         <ClientImport existing={clients} onClose={() => setImporting(false)} />
@@ -2169,7 +2258,11 @@ export function SettingsPage() {
                 </p>
               </div>
             </div>
-            <div className="wp-choice-group" role="radiogroup" aria-label="Análise automática de documentos">
+            <div
+              className="wp-choice-group"
+              role="radiogroup"
+              aria-label="Análise automática de documentos"
+            >
               {(
                 [
                   {
@@ -2215,9 +2308,8 @@ export function SettingsPage() {
             </div>
             <p className="wp-settings-help">
               A leitura usa Docling, com PaddleOCR para fotos e digitalizações,
-              e a conferência usa o modelo Jev. Se a análise falhar, o
-              documento segue para revisão manual — nada é aprovado sem
-              conferência.
+              e a conferência usa o modelo Jev. Se a análise falhar, o documento
+              segue para revisão manual — nada é aprovado sem conferência.
             </p>
           </section>
           <section className="panel wp-settings-section">
@@ -2267,9 +2359,8 @@ export function SettingsPage() {
                 <div>
                   <h2>Plano e cobrança</h2>
                   <p>
-                    O pagamento é processado pela Stripe. Trocar de plano,
-                    mudar o cartão ou cancelar acontece na área de cobrança
-                    dela.
+                    O pagamento é processado pela Stripe. Trocar de plano, mudar
+                    o cartão ou cancelar acontece na área de cobrança dela.
                   </p>
                 </div>
               </div>
