@@ -9,5 +9,13 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["vite.config.ts", "playwright.config.ts"]
+  // src/lib/answers.ts and what it imports are listed because vite.config.ts
+  // imports them: the build writes the answer source and /llms.txt from the
+  // same module the app renders, so this project compiles it too.
+  "include": [
+    "vite.config.ts",
+    "playwright.config.ts",
+    "src/lib/answers.ts",
+    "src/lib/plans.ts"
+  ]
 }

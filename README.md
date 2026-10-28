@@ -84,7 +84,7 @@ TanStack Query controla os dados remotos; React Hook Form e Zod validam autentic
 5. [Segurança e condições para o piloto](docs/05-seguranca-e-piloto.md).
 6. [Contrato efetivamente implementado](docs/api-contract.md) e [OpenAPI 3.1](apps/api/openapi.json).
 7. [Validações executadas e pendências](docs/06-validacao-da-entrega.md).
-8. [SEO e presença pública](docs/08-seo.md): o que é indexável, o domínio canônico e as pendências.
+8. [SEO, presença pública e motores de resposta](docs/08-seo.md): o que é indexável, o domínio canônico, a fonte de respostas pré-renderizada com o `/llms.txt` para motores de resposta (GEO/AEO) e as pendências.
 
 Metas de 60 segundos para criar uma solicitação e até duas ações para aprovação são **metas de projeto**. Não foram medidas com usuários reais. Links/recorrência/revisão não são apresentados como diferenciais exclusivos.
 

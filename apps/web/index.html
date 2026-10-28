@@ -15,7 +15,10 @@
          other route sets its own robots tag from src/lib/seo.ts, and nginx
          sends X-Robots-Tag for the workspace and the client portal. -->
     <link rel="canonical" href="https://docping.com.br/" />
-    <meta name="robots" content="index, follow, max-image-preview:large" />
+    <meta
+      name="robots"
+      content="index, follow, max-image-preview:large, max-snippet:-1"
+    />
     <meta name="referrer" content="no-referrer" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <!-- Social crawlers do not run JavaScript, so these stay static and
@@ -68,7 +71,16 @@
             "name": "DocPing",
             "url": "https://docping.com.br/",
             "logo": "https://docping.com.br/favicon.svg",
-            "description": "Coleta e conferência de documentos de clientes para escritórios contábeis, de advocacia e imobiliárias."
+            "description": "Coleta e conferência de documentos de clientes para escritórios contábeis, de advocacia e imobiliárias.",
+            "email": "contato@docping.com.br",
+            "areaServed": { "@type": "Country", "name": "Brasil" },
+            "knowsLanguage": "pt-BR",
+            "contactPoint": {
+              "@type": "ContactPoint",
+              "contactType": "customer support",
+              "email": "suporte@docping.com.br",
+              "availableLanguage": "pt-BR"
+            }
           },
           {
             "@type": "WebSite",
@@ -76,13 +88,53 @@
             "name": "DocPing",
             "url": "https://docping.com.br/",
             "inLanguage": "pt-BR",
-            "publisher": { "@id": "https://docping.com.br/#organizacao" }
+            "publisher": { "@id": "https://docping.com.br/#organizacao" },
+            "about": "Coleta e conferência de documentos de clientes.",
+            "subjectOf": {
+              "@type": "DataDownload",
+              "name": "Descrição oficial do DocPing para motores de resposta",
+              "encodingFormat": "text/markdown",
+              "contentUrl": "https://docping.com.br/llms.txt"
+            }
           }
         ]
       }
     </script>
   </head>
   <body>
+    <!-- At build time vite.config.ts writes the answer source inside #root:
+         the facts of the landing page, in plain HTML, for the crawlers that do
+         not run JavaScript and for a visitor who has it off. React clears the
+         container when it mounts, so these rules only ever style the moment
+         before that -- the bundle carries the real stylesheet. -->
+    <style>
+      .answer-source {
+        max-width: 42rem;
+        margin: 0 auto;
+        padding: 3rem 1rem;
+        font-family: "DM Sans", system-ui, sans-serif;
+        line-height: 1.55;
+        color: #141414;
+      }
+      .answer-source h1 {
+        font-size: 1.75rem;
+        line-height: 1.2;
+      }
+      .answer-source h2 {
+        font-size: 1.15rem;
+        margin-top: 2rem;
+      }
+      .answer-source h3 {
+        font-size: 1rem;
+        margin-top: 1.5rem;
+      }
+      .answer-source li {
+        margin-bottom: 0.4rem;
+      }
+      .answer-source nav a {
+        margin-right: 1rem;
+      }
+    </style>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

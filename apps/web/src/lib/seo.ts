@@ -1,10 +1,26 @@
 import { useEffect } from "react";
+import {
+  SITE_NAME,
+  SITE_URL,
+  faqPageLd,
+  softwareApplicationLd,
+  type PlanForLd,
+  type QuestionForLd,
+} from "./answers";
 
-// The public identity of the site, in one place. The canonical host is also
-// hardcoded in index.html: social and search crawlers read those tags before
-// any JavaScript runs, so they cannot be derived from here.
-export const SITE_URL = "https://docping.com.br";
-export const SITE_NAME = "DocPing";
+// This module is the browser half of the subject: it writes tags into the
+// document for the route that is open. What the site says about itself lives
+// in lib/answers.ts, which has no React in it because apps/web/vite.config.ts
+// reads it at build time -- the answer engines do not run our JavaScript. The
+// names below are re-exported so every page keeps importing them from here.
+export {
+  SITE_NAME,
+  SITE_URL,
+  faqPageLd,
+  softwareApplicationLd,
+  type PlanForLd,
+  type QuestionForLd,
+};
 
 export type PageMeta = {
   // The whole <title>, already including the brand.
@@ -42,7 +58,12 @@ export function applyPageMeta({ title, description, path, index }: PageMeta) {
   meta(
     "name",
     "robots",
-    index ? "index, follow, max-image-preview:large" : "noindex, nofollow",
+    // max-snippet:-1 lifts the cap on how much of the page an engine may
+    // quote in an answer. There is nothing on a public page of ours that we
+    // would rather it paraphrase than quote.
+    index
+      ? "index, follow, max-image-preview:large, max-snippet:-1"
+      : "noindex, nofollow",
   );
   meta("property", "og:title", title);
   meta("property", "og:site_name", SITE_NAME);
@@ -78,65 +99,9 @@ export function usePageMeta(page: PageMeta) {
   }, [title, description, path, index]);
 }
 
-// Structured data lives next to the content it describes, so the two cannot
-// drift apart: the builders below take the very arrays the page renders.
-export function useJsonLd(id: string, data: unknown) {
-  const payload = JSON.stringify(data);
-  useEffect(() => {
-    const script = document.createElement("script");
-    script.type = "application/ld+json";
-    script.id = id;
-    script.textContent = payload;
-    document.head.append(script);
-    return () => script.remove();
-  }, [id, payload]);
-}
-
-export type PlanForLd = { name: string; price: string };
-export type QuestionForLd = readonly [question: string, answer: string];
-
-// Only the prices the page itself prints. No rating, no review count: nothing
-// here may claim more than the product shows.
-export function softwareApplicationLd(plans: readonly PlanForLd[]) {
-  const prices = plans
-    .map((plan) => Number(plan.price))
-    .filter((price) => Number.isFinite(price));
-  return {
-    "@context": "https://schema.org",
-    "@type": "SoftwareApplication",
-    name: SITE_NAME,
-    url: `${SITE_URL}/`,
-    applicationCategory: "BusinessApplication",
-    operatingSystem: "Web",
-    inLanguage: "pt-BR",
-    description:
-      "Plataforma de coleta e conferência de documentos de clientes: solicitações por link, lembretes automáticos e análise automática de cada arquivo recebido.",
-    offers: {
-      "@type": "AggregateOffer",
-      priceCurrency: "BRL",
-      offerCount: plans.length,
-      lowPrice: Math.min(...prices),
-      highPrice: Math.max(...prices),
-      offers: plans.map((plan) => ({
-        "@type": "Offer",
-        name: plan.name,
-        price: Number(plan.price),
-        priceCurrency: "BRL",
-        url: `${SITE_URL}/#precos`,
-      })),
-    },
-  };
-}
-
-export function faqPageLd(questions: readonly QuestionForLd[]) {
-  return {
-    "@context": "https://schema.org",
-    "@type": "FAQPage",
-    inLanguage: "pt-BR",
-    mainEntity: questions.map(([question, answer]) => ({
-      "@type": "Question",
-      name: question,
-      acceptedAnswer: { "@type": "Answer", text: answer },
-    })),
-  };
-}
+// Structured data is no longer injected from here. It is written into
+// index.html at build time by the answer-engine plugin in vite.config.ts, from
+// the same arrays the landing page renders: a crawler that does not run
+// JavaScript -- which is most of the answer engines -- would never have seen a
+// script this module appended, and emitting it twice would mean two FAQPage
+// blocks for the one crawler that does.

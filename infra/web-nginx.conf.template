@@ -48,9 +48,15 @@ http {
       add_header X-Content-Type-Options nosniff always;
       try_files $uri =404;
     }
-    # robots.txt and the sitemap are the two files a crawler asks for before
-    # anything else; they are static and may be cached for a while.
-    location ~ ^/(robots\.txt|sitemap\.xml)$ {
+    # robots.txt, the sitemap and llms.txt are what a crawler asks for before
+    # anything else; they are static and may be cached for a while. llms.txt is
+    # the plain-text description of the site that answer engines and agents
+    # read, written at build time from apps/web/src/lib/answers.ts, and it is
+    # in Portuguese: charset makes nginx label text/plain as UTF-8 instead of
+    # leaving the accents to the client's guess.
+    location ~ ^/(robots\.txt|sitemap\.xml|llms\.txt)$ {
+      charset utf-8;
+      charset_types text/plain;
       add_header Cache-Control "public, max-age=3600";
       add_header Referrer-Policy no-referrer always;
       add_header X-Content-Type-Options nosniff always;

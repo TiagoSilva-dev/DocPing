@@ -1,7 +1,50 @@
-# Only the landing page is meant for search results. The workspace, the client
-# portal and the auth forms are private or thin, and the portal links in
-# particular are access tokens that must never reach an index.
+# Only the landing page and the two legal pages are meant for an index or an
+# answer. The workspace, the client portal and the auth forms are private or
+# thin, and the portal links in particular are access tokens that must never
+# reach an index -- nginx also sends X-Robots-Tag for those prefixes, because a
+# crawler that ignores this file would otherwise receive the same index.html.
 User-agent: *
+Disallow: /app
+Disallow: /p/
+Disallow: /portal/
+Disallow: /entrar
+Disallow: /cadastro
+Disallow: /esqueci-senha
+Disallow: /redefinir-senha
+Disallow: /confirmar-email
+Disallow: /assinar
+Disallow: /api/
+
+# The crawlers of the answer engines are welcome on the public pages, and the
+# decision is written down instead of inherited: a group named here does not
+# read the group above, so the private paths are repeated. Being quoted in an
+# answer is how an office that never typed "DocPing" finds out it exists, and
+# /llms.txt is the short, plain-text version of what the landing page says.
+#
+# Google-Extended and Applebot-Extended do not control crawling at all -- they
+# control whether the content may be used in those companies' AI answers and
+# models. Their default is already "allowed"; they are listed so that the
+# default is a choice and not an oversight.
+User-agent: GPTBot
+User-agent: OAI-SearchBot
+User-agent: ChatGPT-User
+User-agent: ClaudeBot
+User-agent: Claude-User
+User-agent: Claude-SearchBot
+User-agent: anthropic-ai
+User-agent: PerplexityBot
+User-agent: Perplexity-User
+User-agent: Google-Extended
+User-agent: Applebot-Extended
+User-agent: DuckAssistBot
+User-agent: Amazonbot
+User-agent: MistralAI-User
+User-agent: cohere-ai
+User-agent: Meta-ExternalAgent
+User-agent: Meta-ExternalFetcher
+User-agent: YouBot
+Allow: /
+Allow: /llms.txt
 Disallow: /app
 Disallow: /p/
 Disallow: /portal/

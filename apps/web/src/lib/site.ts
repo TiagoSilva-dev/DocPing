@@ -9,8 +9,11 @@
 // absent one simply means no tag is loaded. Nothing here is a secret — a
 // measurement id is public by design, it travels in the page.
 
-export const CONTACT_EMAIL = "contato@docping.com.br";
-export const SUPPORT_EMAIL = "suporte@docping.com.br";
+// The two public addresses are declared in lib/answers.ts, which the build
+// reads in Node to write /llms.txt and the prerendered answer source: this
+// module touches import.meta.env on import and cannot be loaded there. They
+// are re-exported so the pages keep importing them from the same place.
+export { CONTACT_EMAIL, SUPPORT_EMAIL } from "./answers";
 
 // Legal identification. Google reviews the advertiser against what the site
 // says about itself, and the LGPD requires the controller to be identifiable.

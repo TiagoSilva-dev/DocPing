@@ -40,11 +40,13 @@ import {
 import { post } from "@/lib/api";
 import { PLANS as plans } from "@/lib/plans";
 import {
-  faqPageLd,
-  softwareApplicationLd,
-  usePageMeta,
-  useJsonLd,
-} from "@/lib/seo";
+  CRITERIA as criteria,
+  QUESTIONS as questions,
+  SECURITY,
+  SEGMENTS,
+  STEPS,
+} from "@/lib/answers";
+import { usePageMeta } from "@/lib/seo";
 import type { Session } from "@/lib/types";
 import "./landing.css";
 
@@ -53,56 +55,15 @@ import "./landing.css";
 // may promote to a decision, never as a validated accuracy claim — see
 // docs/06-validacao-da-entrega.md before strengthening any wording here.
 
-const questions: [string, string][] = [
-  [
-    "Meus clientes precisam criar uma conta?",
-    "Não. O cliente acessa o link da solicitação, envia os documentos pelo celular ou computador e acompanha o que ainda falta. Sem cadastro e sem instalar aplicativo.",
-  ],
-  [
-    "A IA aprova documentos sozinha?",
-    "Só se o seu escritório pedir. O padrão é o modo sugerir: a análise aparece como recomendação e a decisão continua sua. No modo automático, o DocPing aplica apenas vereditos em que todos os critérios concordam — qualquer dúvida vai para uma pessoa. Você pode rever qualquer decisão, e o histórico registra o que foi decidido pela análise e o que foi decidido por você.",
-  ],
-  [
-    "Em que a análise se baseia?",
-    "O texto do documento é extraído com OCR e comparado ao que foi pedido naquele item: se é o tipo certo, se o titular confere, se a competência bate, se está completo, se está legível e se há algum impedimento. Cada critério tem uma confiança própria, e todos ficam visíveis na tela de revisão.",
-  ],
-  [
-    "E se a análise errar?",
-    "Aprovar e reprovar continuam sendo seus, a qualquer momento. Quando um documento é devolvido, o cliente vê o motivo e reenvia apenas aquele item. Se preferir, desligue a análise em Configurações sem perder nada do restante.",
-  ],
-  [
-    "Como funciona o envio por WhatsApp?",
-    "O DocPing abre o WhatsApp com uma mensagem pronta e o link da solicitação. Você confere e confirma o envio. Os lembretes automáticos são enviados por e-mail; o WhatsApp é compartilhado manualmente.",
-  ],
-  [
-    "Posso usar a mesma lista todos os meses?",
-    "Sim. Salve uma lista como modelo ou configure uma recorrência mensal. O DocPing cria as próximas solicitações para os clientes escolhidos, na data que você definir.",
-  ],
-  [
-    "E se o cliente enviar um documento errado?",
-    "Você solicita uma correção no próprio documento e informa o motivo. O cliente vê o que precisa ajustar e reenvia somente aquele item. O restante do trabalho fica preservado.",
-  ],
-  [
-    "Onde os arquivos ficam guardados?",
-    "Em armazenamento privado, nunca em link público. Só PDF, JPG, PNG e HEIC são aceitos, conferidos pelo conteúdo e não apenas pela extensão, e o arquivo só é servido a quem tem sessão no seu escritório, com os dados de cada escritório isolados dos demais.",
-  ],
-  [
-    "Posso conhecer antes de cadastrar meus clientes?",
-    "Sim. A demonstração abre um escritório de exemplo com clientes e documentos fictícios. Explore o fluxo e, quando fizer sentido, crie o espaço do seu escritório.",
-  ],
-];
-
-const criteria = [
-  ["Tipo do documento", "É mesmo o documento que foi pedido naquele item."],
-  ["Titular", "O nome ou CNPJ no documento é o do cliente da solicitação."],
-  ["Competência", "O período do documento é o da solicitação."],
-  ["Integridade", "Está completo, sem páginas faltando ou conteúdo cortado."],
-  ["Legibilidade", "Dá para ler — inclusive em foto tirada pelo celular."],
-  [
-    "Impedimentos",
-    "Documento vencido, rasurado ou com indício de adulteração.",
-  ],
-];
+// The questions, the six criteria, the three steps, the segments and the
+// security list live in lib/answers.ts: this page renders them, /llms.txt
+// publishes them and the prerendered answer source in index.html repeats them,
+// and an answer engine must not find three versions of the same sentence.
+// Only the icons stay here, in the order of the arrays they illustrate: an
+// answer engine has no use for one, and lib/answers.ts carries no React.
+const stepIcons = [Layers, Link2, FileCheck2];
+const segmentIcons = [Building2, Scale, KeyRound];
+const securityIcons = [Lock, ShieldCheck, Eye, Clock, Server, FileCheck2];
 
 const comparison = [
   [
@@ -139,10 +100,6 @@ export function Landing() {
     path: "/",
     index: true,
   });
-  // Built from the arrays this page renders, so the markup search engines read
-  // and the page a person reads can never disagree.
-  useJsonLd("ld-aplicacao", softwareApplicationLd(plans));
-  useJsonLd("ld-faq", faqPageLd(questions));
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
@@ -342,35 +299,19 @@ export function Landing() {
             </p>
           </div>
           <div className="lp-step-grid">
-            {[
-              {
-                number: "01",
-                icon: Layers,
-                title: "Peça o que precisa.",
-                text: "Escolha os clientes, use um modelo de documentos e defina o prazo. Sua lista está pronta para compartilhar.",
-              },
-              {
-                number: "02",
-                icon: Link2,
-                title: "Compartilhe um link.",
-                text: "Seu cliente abre pelo celular e envia os arquivos, um por vez. Pode sair e continuar depois, sem perder o que já enviou.",
-              },
-              {
-                number: "03",
-                icon: FileCheck2,
-                title: "Confira e siga em frente.",
-                text: "A análise chega com o documento. Você confirma, ajusta ou pede correção — e tudo fica junto da solicitação.",
-              },
-            ].map((step) => (
-              <article className="lp-step" key={step.number}>
-                <div className="lp-step-top">
-                  <span className="mono">{step.number}</span>
-                  <step.icon size={24} strokeWidth={1.25} />
-                </div>
-                <h3>{step.title}</h3>
-                <p>{step.text}</p>
-              </article>
-            ))}
+            {STEPS.map((step, index) => {
+              const Icon = stepIcons[index];
+              return (
+                <article className="lp-step" key={step.number}>
+                  <div className="lp-step-top">
+                    <span className="mono">{step.number}</span>
+                    <Icon size={24} strokeWidth={1.25} />
+                  </div>
+                  <h3>{step.title}</h3>
+                  <p>{step.text}</p>
+                </article>
+              );
+            })}
           </div>
         </section>
         <section className="lp-ai" id="analise-ia">
@@ -597,29 +538,16 @@ export function Landing() {
             </p>
           </div>
           <div className="lp-segment-grid">
-            {[
-              {
-                icon: Building2,
-                title: "Contabilidade e BPO",
-                text: "Fechamento mensal, notas, extratos e folha, cliente a cliente.",
-              },
-              {
-                icon: Scale,
-                title: "Advocacia e consultoria",
-                text: "Documentação de processo e abertura de empresa, com prazo e histórico.",
-              },
-              {
-                icon: KeyRound,
-                title: "Imobiliárias e locação",
-                text: "Documentos de locatário e fiador reunidos antes da assinatura.",
-              },
-            ].map((segment) => (
-              <article className="lp-segment" key={segment.title}>
-                <segment.icon size={22} strokeWidth={1.25} />
-                <h3>{segment.title}</h3>
-                <p>{segment.text}</p>
-              </article>
-            ))}
+            {SEGMENTS.map((segment, index) => {
+              const Icon = segmentIcons[index];
+              return (
+                <article className="lp-segment" key={segment.title}>
+                  <Icon size={22} strokeWidth={1.25} />
+                  <h3>{segment.title}</h3>
+                  <p>{segment.text}</p>
+                </article>
+              );
+            })}
           </div>
         </section>
         <section className="lp-security" id="seguranca">
@@ -637,46 +565,18 @@ export function Landing() {
               </p>
             </div>
             <div className="lp-security-grid">
-              {[
-                {
-                  icon: Lock,
-                  title: "Armazenamento privado",
-                  text: "Arquivos nunca ficam em link público. Só são servidos a quem tem sessão no seu escritório.",
-                },
-                {
-                  icon: ShieldCheck,
-                  title: "Tipo de arquivo conferido",
-                  text: "Só PDF, JPG, PNG e HEIC entram, verificados pela assinatura do conteúdo e não apenas pela extensão.",
-                },
-                {
-                  icon: Eye,
-                  title: "Link próprio por solicitação",
-                  text: "Cada solicitação tem seu link, revogável a qualquer momento, com código por e-mail quando você quiser.",
-                },
-                {
-                  icon: Clock,
-                  title: "Acesso protegido",
-                  text: "Senha com Argon2id, limite de tentativas e verificação de origem a cada requisição.",
-                },
-                {
-                  icon: Server,
-                  title: "Dados isolados por escritório",
-                  text: "Cada escritório enxerga apenas o que é seu, verificado a cada requisição.",
-                },
-                {
-                  icon: FileCheck2,
-                  title: "Histórico de decisões",
-                  text: "Quem aprovou, quando e por quê — inclusive quando a decisão foi automática.",
-                },
-              ].map((item) => (
-                <article className="lp-security-item" key={item.title}>
-                  <item.icon size={17} strokeWidth={1.4} />
-                  <div>
-                    <h3>{item.title}</h3>
-                    <p>{item.text}</p>
-                  </div>
-                </article>
-              ))}
+              {SECURITY.map((item, index) => {
+                const Icon = securityIcons[index];
+                return (
+                  <article className="lp-security-item" key={item.title}>
+                    <Icon size={17} strokeWidth={1.4} />
+                    <div>
+                      <h3>{item.title}</h3>
+                      <p>{item.text}</p>
+                    </div>
+                  </article>
+                );
+              })}
             </div>
           </div>
         </section>
