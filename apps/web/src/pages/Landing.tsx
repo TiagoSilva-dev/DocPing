@@ -584,7 +584,7 @@ export function Landing() {
           <div className="lp-section-heading">
             <span className="lp-eyebrow">PLANOS</span>
             <h2>
-              A partir de R$ 67 por mês.
+              A partir de R$ {plans[0].price} por mês.
               <br />
               <span>Com a análise já inclusa.</span>
             </h2>

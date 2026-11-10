@@ -253,7 +253,7 @@ O portal do cliente não recebe nenhuma tag de medição ou publicidade.
 ### Preço na vitrine
 
 O título dos planos diz o preço do plano mais barato realmente à venda
-(R$ 67). Anúncio e landing precisam dizer a mesma coisa, e o Google compara.
+(R$ 40). Anúncio e landing precisam dizer a mesma coisa, e o Google compara.
 O selo do plano em destaque diz "Nossa recomendação": "Mais escolhido" é uma
 afirmação sobre a escolha de outras pessoas, e não temos esse dado.
 

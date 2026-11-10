@@ -25,7 +25,7 @@ export const PLANS: Plan[] = [
   {
     id: "essencial",
     name: "Essencial",
-    price: "67",
+    price: "40",
     pitch: "Para o escritório que está organizando a coleta pela primeira vez.",
     featured: false,
     items: [
@@ -37,7 +37,7 @@ export const PLANS: Plan[] = [
   {
     id: "escritorio",
     name: "Escritório",
-    price: "127",
+    price: "90",
     pitch: "Para a rotina de fechamento com uma carteira inteira todo mês.",
     featured: true,
     items: [
@@ -50,7 +50,7 @@ export const PLANS: Plan[] = [
   {
     id: "rede",
     name: "Rede",
-    price: "197",
+    price: "140",
     pitch: "Para quem atende centenas de empresas e não pode perder prazo.",
     featured: false,
     items: [
