@@ -176,7 +176,7 @@ test("@desktop escritório → cliente inline → solicitação → envio públi
     matchesResponse(response, "/api/auth/register", "POST"),
   );
   await page
-    .getByRole("button", { name: "Criar meu escritório", exact: true })
+    .getByRole("button", { name: "Começar o teste grátis", exact: true })
     .click();
   const session = await json<Session>(await registration);
   expect(session.organization.demo).toBe(false);

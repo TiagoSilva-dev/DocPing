@@ -25,7 +25,7 @@ import { Shell } from "@/components/Shell";
 import { usePageMeta } from "@/lib/seo";
 import { Button, Logo, Loading, ErrorState } from "@/components/shared";
 import { CookieNotice } from "@/components/CookieNotice";
-import { pageView } from "@/lib/consent";
+import { pageView, purchased } from "@/lib/consent";
 const Dashboard = lazy(() =>
   import("@/pages/Dashboard").then((m) => ({ default: m.Dashboard })),
 );
@@ -153,6 +153,9 @@ function ConfirmingPayment() {
     refetchInterval: 2000,
   });
   const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    purchased();
+  }, []);
   useEffect(() => {
     const timer = setTimeout(() => setSlow(true), 20000);
     return () => clearTimeout(timer);

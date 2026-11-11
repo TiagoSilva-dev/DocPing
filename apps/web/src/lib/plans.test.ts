@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PLANS, planName, subscriptionLabel } from "./plans";
+import { PLANS, planName, subscriptionLabel, trialDaysLeft } from "./plans";
 
 describe("planos", () => {
   // The id is not a label: it is the slug posted to /api/billing/checkout and
@@ -58,5 +58,18 @@ describe("planos", () => {
     expect(subscriptionLabel("canceled")).toBe("Cancelada");
     expect(subscriptionLabel("")).toBe("Sem assinatura");
     expect(subscriptionLabel("algo_novo_da_stripe")).toBe("Sem assinatura");
+  });
+});
+
+describe("trialDaysLeft", () => {
+  const now = Date.parse("2026-11-11T12:00:00Z");
+  it("arredonda para cima o que ainda resta", () => {
+    expect(trialDaysLeft("2026-11-18T12:00:00Z", now)).toBe(7);
+    expect(trialDaysLeft("2026-11-11T13:00:00Z", now)).toBe(1);
+  });
+  it("lê como encerrado o que passou, falta ou não é data", () => {
+    expect(trialDaysLeft("2026-11-11T11:00:00Z", now)).toBe(0);
+    expect(trialDaysLeft(undefined, now)).toBe(0);
+    expect(trialDaysLeft("amanhã", now)).toBe(0);
   });
 });

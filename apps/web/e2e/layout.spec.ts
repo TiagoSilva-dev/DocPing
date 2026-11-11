@@ -55,7 +55,7 @@ test("@desktop páginas públicas cabem na tela e formulário informa erros aces
   }
   await page.goto("/cadastro");
   await page
-    .getByRole("button", { name: "Criar meu escritório", exact: true })
+    .getByRole("button", { name: "Começar o teste grátis", exact: true })
     .click();
   await expect(
     page.getByText("Informe o nome do escritório.", { exact: true }),

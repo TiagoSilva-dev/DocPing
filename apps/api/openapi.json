@@ -3196,6 +3196,11 @@
             "type": "boolean",
             "description": "Há cliente Stripe gravado, então a área de cobrança abre"
           },
+          "trialEndsAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Fim do teste grátis de 7 dias. Presente enquanto o teste decide o acesso (em curso, ou encerrado sem assinatura); vazio depois que a Stripe informa qualquer assinatura"
+          },
           "activeRequests": {
             "type": "integer"
           },

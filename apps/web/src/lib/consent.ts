@@ -103,6 +103,9 @@ export function restore() {
 // track reports an event, and silently does nothing when there is no consent
 // or no tag. Callers never have to ask whether measurement is on.
 export function track(name: string, params?: Record<string, unknown>) {
+  // An event can fire before the notice has mounted and restored the tag (the
+  // return from checkout does), so a stored yes is honoured here as well.
+  restore();
   if (!loaded || !window.gtag) return;
   window.gtag("event", name, params ?? {});
 }
@@ -123,4 +126,50 @@ export function pageView(path: string) {
 export function signup() {
   track("sign_up");
   if (ADS_SIGNUP_LABEL) track("conversion", { send_to: ADS_SIGNUP_LABEL });
+}
+
+// The steps between the click and the sale. Without them a campaign shows
+// clicks and zero conversions and nothing says where the visitors stopped:
+// at the landing, inside the demonstration, or in front of the price.
+export function demoOpened(from: "landing" | "auth") {
+  track("demo_open", { from });
+}
+
+const CHECKOUT_KEY = "docping.checkout.v1";
+
+// checkoutStarted remembers the plan across the trip to Stripe, because the
+// page that comes back knows only that a payment cleared, not which one.
+export function checkoutStarted(plan: string, price: number) {
+  track("begin_checkout", {
+    currency: "BRL",
+    value: price,
+    items: [{ item_id: plan }],
+  });
+  try {
+    sessionStorage.setItem(CHECKOUT_KEY, JSON.stringify({ plan, price }));
+  } catch {
+    // The purchase is then reported without a value, which is still a sale.
+  }
+}
+
+// purchased runs on the return from Stripe. The stored plan is removed as it
+// is read, so reloading the confirmation page does not count a second sale.
+export function purchased() {
+  let plan = "";
+  let price: number | undefined;
+  try {
+    const raw = sessionStorage.getItem(CHECKOUT_KEY);
+    if (!raw) return;
+    sessionStorage.removeItem(CHECKOUT_KEY);
+    const parsed = JSON.parse(raw) as { plan?: string; price?: number };
+    plan = parsed.plan ?? "";
+    price = parsed.price;
+  } catch {
+    return;
+  }
+  track("purchase", {
+    currency: "BRL",
+    value: price,
+    items: [{ item_id: plan }],
+  });
 }

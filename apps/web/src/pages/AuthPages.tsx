@@ -20,7 +20,8 @@ import { Button, Field, Logo } from "@/components/shared";
 import { Form, FormMessage } from "@/components/ui/form";
 import { ApiError, post } from "@/lib/api";
 import { usePageMeta } from "@/lib/seo";
-import { signup } from "@/lib/consent";
+import { demoOpened, signup } from "@/lib/consent";
+import { TRIAL_DAYS } from "@/lib/plans";
 import type { Session } from "@/lib/types";
 import "./auth-pages.css";
 
@@ -365,7 +366,9 @@ export function AuthPage({ register = false }: { register?: boolean }) {
   async function demo() {
     setDemoPending(true);
     try {
-      enter(await post<Session>("/auth/demo"), "/app");
+      const session = await post<Session>("/auth/demo");
+      demoOpened("auth");
+      enter(session, "/app");
     } catch (error) {
       setError("root", { message: errorMessage(error) });
     } finally {
@@ -395,7 +398,7 @@ export function AuthPage({ register = false }: { register?: boolean }) {
         </h2>
         <p>
           {register
-            ? "Crie o espaço do seu escritório. Em seguida, vamos preparar sua primeira solicitação."
+            ? `Crie o espaço do seu escritório e use por ${TRIAL_DAYS} dias sem informar cartão. Em seguida, vamos preparar sua primeira solicitação.`
             : "Entre para ver o que chegou e o que ainda falta."}
         </p>
       </div>
@@ -498,7 +501,7 @@ export function AuthPage({ register = false }: { register?: boolean }) {
           loading={isSubmitting}
           disabled={demoPending}
         >
-          {register ? "Criar meu escritório" : "Entrar no meu espaço"}
+          {register ? "Começar o teste grátis" : "Entrar no meu espaço"}
           <ArrowRight size={16} />
         </Button>
       </Form>

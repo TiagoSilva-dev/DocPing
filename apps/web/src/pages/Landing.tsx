@@ -38,7 +38,8 @@ import {
   SUPPORT_EMAIL,
 } from "@/lib/site";
 import { post } from "@/lib/api";
-import { PLANS as plans } from "@/lib/plans";
+import { demoOpened } from "@/lib/consent";
+import { PLANS as plans, TRIAL_DAYS } from "@/lib/plans";
 import {
   CRITERIA as criteria,
   QUESTIONS as questions,
@@ -110,6 +111,7 @@ export function Landing() {
     setError("");
     try {
       const session = await post<Session>("/auth/demo");
+      demoOpened("landing");
       queryClient.clear();
       queryClient.setQueryData(["session"], session);
       navigate("/app");
@@ -131,7 +133,7 @@ export function Landing() {
           <ArrowRight size={16} />
         </Button>
         <Link className="lp-secondary-link" to="/cadastro">
-          Criar meu escritório
+          Testar grátis por {TRIAL_DAYS} dias
           <ArrowRight size={15} />
         </Link>
       </div>
@@ -160,7 +162,7 @@ export function Landing() {
         <div className="lp-header-actions">
           <Link to="/entrar">Entrar</Link>
           <Link className="lp-small-cta" to="/cadastro">
-            Criar meu escritório
+            Testar grátis
             <ArrowRight size={13} />
           </Link>
         </div>
@@ -621,18 +623,19 @@ export function Landing() {
                   className={`lp-plan-cta${plan.featured ? " lp-plan-cta-featured" : ""}`}
                   to="/cadastro"
                 >
-                  Criar meu escritório
+                  Testar grátis por {TRIAL_DAYS} dias
                   <ArrowRight size={14} />
                 </Link>
               </article>
             ))}
           </div>
           <p className="lp-plan-note">
-            Quer conhecer antes de assinar? A demonstração abre na hora, com
-            dados fictícios e sem cadastro. Todos os planos são mensais, sem
-            fidelidade, e o cancelamento é feito por você a qualquer momento.
-            Escritórios do piloto fundador mantêm o preço de entrada enquanto
-            forem clientes.
+            Todo escritório novo usa o DocPing por {TRIAL_DAYS} dias sem
+            informar cartão, com até 20 clientes, e só depois escolhe um plano.
+            Quer só olhar? A demonstração abre na hora, com dados fictícios e
+            sem cadastro. Todos os planos são mensais, sem fidelidade, e o
+            cancelamento é feito por você a qualquer momento. Escritórios do
+            piloto fundador mantêm o preço de entrada enquanto forem clientes.
           </p>
         </section>
         <section className="lp-faq lp-container">

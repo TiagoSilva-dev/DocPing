@@ -63,6 +63,7 @@ func (c *call) billingState() map[string]any {
 		"periodEnd":         c.Org.PeriodEnd,
 		"cancelAtPeriodEnd": c.Org.CancelAtPeriodEnd,
 		"manageable":        c.Org.StripeCustomerID != "",
+		"trialEndsAt":       c.trialEndsAt(),
 		"activeRequests":    activeRequests(c.S, c.Org.ID),
 		"limits": map[string]any{
 			"activeRequests": e.ActiveRequests,
@@ -71,6 +72,16 @@ func (c *call) billingState() map[string]any {
 		},
 	}
 }
+
+// trialEndsAt is reported only while the trial is the thing that decides
+// access -- running, or run out with nothing bought. Once Stripe has spoken
+// the date is history and the screen has no use for it.
+func (c *call) trialEndsAt() string {
+	if c.Org.SubscriptionStatus != "" {
+		return ""
+	}
+	return c.Org.TrialEndsAt
+}
 func (a *App) session(c *call) (any, error) { return c.sessionResponse(), nil }
 func (c *call) newSession(u domain.User) any {
 	raw := token()
@@ -78,6 +89,14 @@ func (c *call) newSession(u domain.User) any {
 	c.S.Sessions[s.Hash] = s
 	c.User = u
 	c.Org = c.S.Organizations[u.OrgID]
+	// The trial starts when the workspace first opens, not when the form was
+	// sent: days spent waiting for a confirmation e-mail are not days of
+	// product. Starting it here also reaches a workspace that registered
+	// before the trial existed and has only ever seen the subscribe screen.
+	if c.A.Config.Billing() && c.Org.StartTrial(time.Now()) {
+		c.S.Organizations[c.Org.ID] = c.Org
+		c.S.Audit(c.Org.ID, u.ID, "billing.trial_started", c.Org.ID)
+	}
 	c.Session = s
 	http.SetCookie(c.W, &http.Cookie{Name: "docping_session", Value: raw, Path: "/", HttpOnly: true, Secure: c.A.Config.Env == "production", SameSite: http.SameSiteLaxMode, MaxAge: 86400})
 	return c.sessionResponse()
@@ -99,9 +118,11 @@ func (a *App) register(c *call) (any, error) {
 			return nil, fail(409, "email_exists", "Este e-mail já possui uma conta.")
 		}
 	}
-	// A workspace opened where billing is on starts with no plan: it is the
-	// subscription that opens it, and the gate in authenticate holds it at
-	// the subscribe screen until Stripe says one exists. Where billing is off
+	// A workspace opened where billing is on starts with no plan and a trial
+	// that newSession opens with its first session; once that runs out, the
+	// gate in authenticate holds it at the subscribe screen until Stripe says
+	// a subscription exists. With no plan it works inside the smallest sold
+	// allowance, which is what PlanEntitlement answers. Where billing is off
 	// -- a development machine, the test suite -- it starts as the founder
 	// pilot, exactly as every workspace did before money existed.
 	plan := domain.PlanFounderPilot

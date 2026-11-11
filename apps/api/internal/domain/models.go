@@ -57,6 +57,11 @@ type Organization struct {
 	// disputed is a conversation, not a reason to lock an accountant out of a
 	// client's documents mid-closing.
 	BillingAlert string `json:"billingAlert,omitempty"`
+	// TrialEndsAt is when the free trial runs out, UTC RFC3339. It is set once,
+	// the first time a workspace that never subscribed opens where billing is
+	// on, and never moved afterwards: a trial that could be restarted would be
+	// a free plan. Empty means the workspace never had one.
+	TrialEndsAt string `json:"trialEndsAt,omitempty"`
 }
 type User struct {
 	ID           string `json:"id"`
@@ -398,12 +403,40 @@ const (
 	SubscriptionPastDue = "past_due"
 )
 
+// TrialDays is how long a new workspace works before it has to choose a
+// plan, with no card asked. apps/web/src/lib/plans.ts prints the same figure
+// on the landing page: change one and change the other in the same commit.
+const TrialDays = 7
+
+// StartTrial opens the trial for a workspace that never had one and never
+// subscribed, and reports whether it did. It is idempotent on purpose: it is
+// called every time a session opens.
+func (o *Organization) StartTrial(now time.Time) bool {
+	if o.Demo || o.Plan == PlanFounderPilot || o.TrialEndsAt != "" || o.SubscriptionStatus != "" {
+		return false
+	}
+	o.TrialEndsAt = now.Add(TrialDays * 24 * time.Hour).UTC().Format(time.RFC3339)
+	return true
+}
+
+// OnTrial is true while the trial is running. Any word from Stripe ends it:
+// a workspace that subscribed and then cancelled does not fall back onto
+// whatever was left of its trial. An unreadable date reads as no trial.
+func (o Organization) OnTrial(now time.Time) bool {
+	if o.TrialEndsAt == "" || o.SubscriptionStatus != "" {
+		return false
+	}
+	end, err := time.Parse(time.RFC3339, o.TrialEndsAt)
+	return err == nil && now.Before(end)
+}
+
 // Entitled answers whether this organization may still create work. A
 // demonstration and a founder pilot always may — neither ever subscribed, and
-// neither is a paying customer whose payment could lapse. Everyone else needs
-// a subscription Stripe still considers alive.
+// neither is a paying customer whose payment could lapse. A workspace inside
+// its trial may. Everyone else needs a subscription Stripe still considers
+// alive.
 func (o Organization) Entitled() bool {
-	if o.Demo || o.Plan == PlanFounderPilot {
+	if o.Demo || o.Plan == PlanFounderPilot || o.OnTrial(time.Now()) {
 		return true
 	}
 	switch o.SubscriptionStatus {

@@ -63,6 +63,9 @@ export interface BillingState {
   periodEnd?: string;
   cancelAtPeriodEnd?: boolean;
   manageable: boolean;
+  // Present while the free trial decides access: running, or run out with
+  // nothing bought. Absent once Stripe has reported any subscription.
+  trialEndsAt?: string;
   activeRequests: number;
   limits: { activeRequests: number; storageBytes: number; clients: number };
 }

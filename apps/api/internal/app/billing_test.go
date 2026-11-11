@@ -71,6 +71,21 @@ func linkCustomer(t *testing.T, app *App, orgID, customer string) {
 	}
 }
 
+// endTrial moves the trial of an organization into the past, which is the
+// state every gate test below starts from: a workspace that used its seven
+// days and bought nothing.
+func endTrial(t *testing.T, app *App, orgID string) {
+	t.Helper()
+	if err := app.Store.Run(t.Context(), true, func(s *domain.State) error {
+		org := s.Organizations[orgID]
+		org.TrialEndsAt = time.Now().Add(-time.Hour).UTC().Format(time.RFC3339)
+		s.Organizations[orgID] = org
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func orgOf(t *testing.T, app *App, id string) domain.Organization {
 	t.Helper()
 	var out domain.Organization
@@ -83,11 +98,75 @@ func orgOf(t *testing.T, app *App, id string) domain.Organization {
 	return out
 }
 
-// A workspace that never subscribed can sign in, read its own record and
-// reach checkout -- and nothing else. That is the whole gate.
+// A new workspace works for the length of the trial with no card and no
+// word from Stripe, inside the smallest allowance that is sold.
+func TestANewWorkspaceStartsOnTrial(t *testing.T) {
+	app, h := billingApp(t)
+	session := registerTest(t, h, "teste-gratis@exemplo.com.br")
+	org := orgOf(t, app, session.Org)
+	end, err := time.Parse(time.RFC3339, org.TrialEndsAt)
+	if err != nil {
+		t.Fatalf("a new workspace should carry a trial end: %q", org.TrialEndsAt)
+	}
+	want := time.Now().Add(domain.TrialDays * 24 * time.Hour)
+	if d := end.Sub(want); d < -time.Minute || d > time.Minute {
+		t.Fatalf("trial should run %d days, ends %s", domain.TrialDays, org.TrialEndsAt)
+	}
+	if status, body, _ := req(t, h, "POST", "/api/clients", map[string]string{"name": "Padaria Aurora", "cnpj": "11222333000181"}, session); status != 200 {
+		t.Fatalf("a workspace on trial refused: %d %s", status, body)
+	}
+	if got := domain.EffectiveClientLimit(org); got != 20 {
+		t.Fatalf("the trial should work inside the smallest sold allowance, got %d", got)
+	}
+	_, body, _ := req(t, h, "GET", "/api/session", nil, session)
+	if !strings.Contains(string(body), `"trialEndsAt":"`+org.TrialEndsAt+`"`) {
+		t.Fatalf("the session should say when the trial ends: %s", body)
+	}
+}
+
+// Signing in again does not restart the clock: a trial that could be
+// restarted would be a free plan.
+func TestATrialIsGrantedOnce(t *testing.T) {
+	app, h := billingApp(t)
+	session := registerTest(t, h, "uma-vez@exemplo.com.br")
+	endTrial(t, app, session.Org)
+	before := orgOf(t, app, session.Org).TrialEndsAt
+	status, body, _ := req(t, h, "POST", "/api/auth/login", map[string]string{"email": "uma-vez@exemplo.com.br", "password": "uma senha segura 123"}, testSession{})
+	if status != 200 {
+		t.Fatalf("login: %d %s", status, body)
+	}
+	if after := orgOf(t, app, session.Org).TrialEndsAt; after != before {
+		t.Fatalf("a new session moved the trial end: %s -> %s", before, after)
+	}
+	if orgOf(t, app, session.Org).Entitled() {
+		t.Fatal("an expired trial entitled the workspace")
+	}
+}
+
+// A subscription that was cancelled does not fall back onto the days that
+// were left of the trial.
+func TestACancelledSubscriptionDoesNotReviveTheTrial(t *testing.T) {
+	org := domain.Organization{TrialEndsAt: time.Now().Add(24 * time.Hour).UTC().Format(time.RFC3339)}
+	if !org.Entitled() {
+		t.Fatal("a running trial must entitle")
+	}
+	org.SubscriptionStatus = "canceled"
+	if org.Entitled() {
+		t.Fatal("a cancelled subscription fell back onto the trial")
+	}
+	org = domain.Organization{TrialEndsAt: "amanhã"}
+	if org.Entitled() {
+		t.Fatal("an unreadable trial date entitled the workspace")
+	}
+}
+
+// A workspace whose trial ran out without a subscription can sign in, read
+// its own record and reach checkout -- and nothing else. That is the whole
+// gate.
 func TestWithoutASubscriptionOnlyTheSubscribeScreenWorks(t *testing.T) {
-	_, h := billingApp(t)
+	app, h := billingApp(t)
 	session := registerTest(t, h, "sem-plano@exemplo.com.br")
+	endTrial(t, app, session.Org)
 	if status, body, _ := req(t, h, "GET", "/api/session", nil, session); status != 200 {
 		t.Fatalf("session should stay readable: %d %s", status, body)
 	}
@@ -201,6 +280,7 @@ func priceeRede() string { return "price_rede" }
 func TestAnUnsignedDeliveryChangesNothing(t *testing.T) {
 	app, h := billingApp(t)
 	session := registerTest(t, h, "forjada@exemplo.com.br")
+	endTrial(t, app, session.Org)
 	linkCustomer(t, app, session.Org, "cus_forge")
 	now := time.Now().Unix()
 	payload := subscriptionEvent("evt_forged", "customer.subscription.created", "cus_forge", "active", priceEscritorio, now, now+100)

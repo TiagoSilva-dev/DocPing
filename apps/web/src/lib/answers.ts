@@ -12,7 +12,7 @@
 // It has no dependency but ./plans on purpose: apps/web/vite.config.ts imports
 // it directly in Node, where Vite's import.meta.env replacement does not run
 // and React has no business being loaded. Keep it free of both.
-import { PLANS } from "./plans";
+import { PLANS, TRIAL_DAYS } from "./plans";
 
 // The canonical identity of the site. Also hardcoded in index.html, robots.txt
 // and sitemap.xml -- crawlers read those before any code of ours runs. All of
@@ -368,7 +368,7 @@ export function llmsTxt(): string {
   );
   push(
     "",
-    `Valores em reais (BRL), por mês, com a análise automática incluída em todos os planos. A assinatura é mensal e pode ser cancelada pelo próprio escritório. Preços publicados em ${SITE_URL}/#precos.`,
+    `Valores em reais (BRL), por mês, com a análise automática incluída em todos os planos. Um escritório novo usa o DocPing por ${TRIAL_DAYS} dias sem informar cartão, dentro do limite do plano Essencial, antes de escolher um plano. A assinatura é mensal e pode ser cancelada pelo próprio escritório. Preços publicados em ${SITE_URL}/#precos.`,
     "",
   );
 

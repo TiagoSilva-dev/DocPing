@@ -197,6 +197,14 @@ function in the package.
   workspace is born `founder_pilot`, exactly as before money existed. With a
   key, `LoadConfig` demands the webhook secret and all three prices, and
   production refuses a test key.
+- A new workspace gets a 7-day trial with no card: `domain.TrialDays`, the
+  same figure `TRIAL_DAYS` in `apps/web/src/lib/plans.ts` prints — change both
+  in one commit. `newSession` starts it the first time the workspace opens
+  (so days waiting for the confirmation e-mail do not count), it is granted
+  once, and it works inside the Essencial allowance with an empty plan. Any
+  status from Stripe ends it: a cancelled subscription never falls back onto
+  leftover trial days. `Organization.Entitled` is still the one rule the gate
+  reads.
 - The three billing routes bypass `a.handle` for the reason upload and export
   do: each one calls Stripe, and an HTTP call to another company must not hold
   a transaction open. The webhook has no session, no CSRF and no Origin — what

@@ -1,5 +1,11 @@
 import { useEffect, useState } from "react";
-import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import {
+  Link,
+  NavLink,
+  Outlet,
+  useLocation,
+  useNavigate,
+} from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
   Home,
@@ -25,6 +31,7 @@ import { Logo, Avatar, Modal, EmptyState, Button } from "./shared";
 import { CommunicationHistory } from "./CommunicationHistory";
 import { latestFailures, type Delivery } from "@/lib/notifications";
 import { useSession } from "@/lib/session";
+import { trialDaysLeft } from "@/lib/plans";
 import { api } from "@/lib/api";
 import type { Client, DocumentRequest } from "@/lib/types";
 import { relativeDate, overdue } from "@/lib/format";
@@ -37,6 +44,7 @@ const links = [
 ];
 export function Shell() {
   const { session, onLogout } = useSession();
+  const trialDays = trialDaysLeft(session.billing?.trialEndsAt);
   const navigate = useNavigate();
   const location = useLocation();
   const [mobile, setMobile] = useState(false);
@@ -231,6 +239,29 @@ export function Shell() {
                 <i />
                 {session.organization.demo ? "Demonstração" : "Ambiente local"}
               </span>
+            )}
+            {/* A visitor who liked the demonstration had no way from here to
+                an account of their own: this is that way. */}
+            {session.organization.demo && (
+              <Link className="demo-cta" to="/cadastro">
+                Criar meu escritório
+                <ArrowRight size={13} />
+              </Link>
+            )}
+            {/* The trial says how long it still runs and where it ends, on
+                every screen, so the last day is never a surprise. */}
+            {trialDays > 0 && (
+              <>
+                <span className="demo-label">
+                  <i />
+                  Teste grátis:{" "}
+                  {trialDays === 1 ? "último dia" : `${trialDays} dias`}
+                </span>
+                <Link className="demo-cta" to="/assinar">
+                  Escolher plano
+                  <ArrowRight size={13} />
+                </Link>
+              </>
             )}
             <button
               className="topbar-search"

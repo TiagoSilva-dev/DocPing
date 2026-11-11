@@ -4,8 +4,9 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowRight, Check, LogOut } from "lucide-react";
 import { Button, Logo } from "@/components/shared";
 import { ApiError, getSession, post, startCheckout } from "@/lib/api";
+import { checkoutStarted } from "@/lib/consent";
 import { usePageMeta } from "@/lib/seo";
-import { PLANS, planName } from "@/lib/plans";
+import { PLANS, planName, trialDaysLeft } from "@/lib/plans";
 import "./subscribe.css";
 
 // The screen a workspace without a subscription lands on. It is the only one
@@ -24,6 +25,11 @@ export default function Subscribe() {
   });
   const billing = session?.billing;
   const lapsed = Boolean(billing?.status) && !billing?.entitled;
+  const trialDays = trialDaysLeft(billing?.trialEndsAt);
+  // The trial ran out and nothing was bought: the most common way to arrive
+  // here, and the one that most needs to hear that nothing was lost.
+  const trialOver =
+    Boolean(billing?.trialEndsAt) && trialDays === 0 && !billing?.entitled;
 
   async function choose(plan: string) {
     setError("");
@@ -32,6 +38,10 @@ export default function Subscribe() {
       // The server answers with Stripe's URL and the browser leaves. No card
       // detail is ever typed into this application.
       const { url } = await startCheckout(plan);
+      checkoutStarted(
+        plan,
+        Number(PLANS.find((p) => p.id === plan)?.price ?? 0),
+      );
       window.location.assign(url);
     } catch (e) {
       setPending("");
@@ -71,13 +81,25 @@ export default function Subscribe() {
         <h1>
           {lapsed
             ? "Sua assinatura não está ativa."
-            : "Escolha o plano do seu escritório."}
+            : trialOver
+              ? "Seu teste grátis terminou."
+              : "Escolha o plano do seu escritório."}
         </h1>
         <p className="subscribe-lead">
           {lapsed
             ? "Os documentos que você já recebeu continuam guardados. Para voltar a criar solicitações, reative a assinatura."
-            : "A conferência automática entra em todos os planos. O que muda é quantos clientes o escritório atende."}
+            : trialOver
+              ? "Os clientes, as solicitações e os documentos que você recebeu continuam guardados. Escolha um plano para continuar de onde parou."
+              : "A conferência automática entra em todos os planos. O que muda é quantos clientes o escritório atende."}
         </p>
+        {trialDays > 0 && (
+          <p className="subscribe-note" role="status">
+            Seu teste grátis vai até o fim{" "}
+            {trialDays === 1 ? "de hoje" : `dos próximos ${trialDays} dias`}.
+            Assinar agora não interrompe nada.{" "}
+            <Link to="/app">Voltar ao escritório</Link>.
+          </p>
+        )}
         {params.get("assinatura") === "cancelada" && (
           <p className="subscribe-note" role="status">
             O pagamento foi interrompido e nada foi cobrado. Você pode escolher

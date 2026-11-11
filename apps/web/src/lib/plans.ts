@@ -95,3 +95,18 @@ export function subscriptionLabel(status: string): string {
       return "Sem assinatura";
   }
 }
+
+// How long a new workspace works before it has to choose a plan, with no
+// card asked. internal/domain/models.go grants exactly this many days in
+// domain.TrialDays: change one and change the other in the same commit.
+export const TRIAL_DAYS = 7;
+
+// trialDaysLeft counts the days still ahead in a trial, rounding up so the
+// last hours read as "1 dia" rather than as nothing. Zero means it ran out,
+// and so does a date that cannot be read.
+export function trialDaysLeft(endsAt: string | undefined, now = Date.now()) {
+  if (!endsAt) return 0;
+  const end = Date.parse(endsAt);
+  if (Number.isNaN(end) || end <= now) return 0;
+  return Math.ceil((end - now) / 86_400_000);
+}

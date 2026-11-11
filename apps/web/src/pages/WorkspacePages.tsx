@@ -27,7 +27,7 @@ import {
   X,
 } from "lucide-react";
 import { api, openBillingPortal, post, put } from "@/lib/api";
-import { planName, subscriptionLabel } from "@/lib/plans";
+import { planName, subscriptionLabel, trialDaysLeft } from "@/lib/plans";
 import { usePageMeta } from "@/lib/seo";
 import type {
   Client,
@@ -2376,7 +2376,9 @@ export function SettingsPage() {
                       className={`wp-billing-dot wp-billing-dot-${billing.entitled ? "ok" : "off"}`}
                       aria-hidden
                     />
-                    {subscriptionLabel(billing.status)}
+                    {trialDaysLeft(billing.trialEndsAt) > 0
+                      ? `Teste grátis até ${dateLabel(billing.trialEndsAt!)}`
+                      : subscriptionLabel(billing.status)}
                   </dd>
                 </div>
                 <div>
